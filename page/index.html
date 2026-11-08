@@ -7,19 +7,85 @@
 <link rel="stylesheet" href="style.css">
 <script src="_magpie/bridge.js"></script>
 <script src="models-data.js"></script>
+<script src="my-models.js"></script>
 <script src="app.js" defer></script>
 </head>
 <body>
 <header>
   <h1>模型价格 <span style="font-size: 12px; font-weight: normal; color: var(--muted);">(Model Prices)</span></h1>
-  <div class="seg" role="tablist" id="filter-seg">
-    <button type="button" role="tab" data-filter="all" aria-selected="true">全部</button>
-    <button type="button" role="tab" data-filter="custom">自定义</button>
-    <button type="button" role="tab" data-filter="matched">已配公价</button>
-    <button type="button" role="tab" data-filter="unpriced">未定价</button>
+  <div class="seg view-tabs" role="tablist" id="view-tabs" aria-label="视图">
+    <button type="button" role="tab" data-view="mine" aria-selected="true">我的模型</button>
+    <button type="button" role="tab" data-view="all">全部模型</button>
   </div>
 </header>
-<p class="sub-desc">基于 models.dev 与 Magpie 账单系统，自动匹配与自定义价格即时生效于每日用量及托盘花费。</p>
+<p class="sub-desc" id="view-desc">只看你在 Magpie 中配置的渠道与模型，按实际生效价格排列。参考价来自 models.dev。</p>
+
+<!-- My Models -->
+<section id="view-mine" aria-labelledby="mm-title">
+  <div class="mm-head">
+    <div class="mm-heading">
+      <h2 id="mm-title">我的模型</h2>
+      <span class="mm-basis" id="mm-basis">Magpie 已配置渠道 × 本地模型快照</span>
+    </div>
+    <div class="mm-head-actions">
+      <div class="seg mm-mode-seg" role="tablist" aria-label="账单统计口径" id="mm-mode-seg">
+        <button type="button" role="tab" data-mode="all-equivalent" aria-selected="true">等值公价</button>
+        <button type="button" role="tab" data-mode="api-only">真实 API</button>
+      </div>
+      <button type="button" class="btn" id="mm-refresh" title="重新读取 Magpie 的渠道列表与插件配置">↻ 刷新配置</button>
+    </div>
+  </div>
+
+  <div class="mm-toolbar">
+    <input type="search" class="search-input mm-search" id="mm-search" placeholder="搜索模型、模型 ID 或供应商..." autocomplete="off" aria-label="搜索我的模型">
+    <button type="button" class="btn mm-toggle" id="mm-provider-btn" aria-expanded="false" aria-controls="mm-filter-panel">
+      渠道筛选 <span class="mm-count" id="mm-provider-count">0</span>
+    </button>
+    <button type="button" class="btn mm-toggle" id="mm-fav-btn" aria-pressed="false">
+      ★ 仅收藏 <span class="mm-count" id="mm-fav-count">0</span>
+    </button>
+    <button type="button" class="btn mm-toggle" id="mm-hide-unpriced" aria-pressed="false">隐藏未知价格</button>
+    <button type="button" class="btn mm-toggle" id="mm-group-btn" aria-pressed="false">按模型对比</button>
+    <button type="button" class="btn btn-quiet" id="mm-reset">恢复默认</button>
+  </div>
+
+  <div class="mm-filter-panel" id="mm-filter-panel" hidden>
+    <div class="mm-filter-head">
+      <input type="search" class="search-input" id="mm-provider-search" placeholder="搜索渠道..." autocomplete="off" aria-label="搜索渠道">
+      <button type="button" class="btn btn-small" id="mm-provider-all">全选</button>
+      <button type="button" class="btn btn-small" id="mm-provider-none">全不选</button>
+    </div>
+    <div class="mm-provider-list" id="mm-provider-list" role="group" aria-label="渠道筛选"></div>
+  </div>
+
+  <p class="mm-notice" id="mm-notice" hidden></p>
+
+  <div class="mm-table-wrap" id="mm-table-wrap">
+    <table class="mm-table" id="mm-table">
+      <thead>
+        <tr>
+          <th scope="col" data-sort="provider" aria-sort="ascending">供应商</th>
+          <th scope="col" data-sort="model">模型</th>
+          <th scope="col" data-sort="input" class="num">输入</th>
+          <th scope="col" data-sort="output" class="num">输出</th>
+          <th scope="col" data-sort="cache_read" class="num mm-col-cache">缓存读取</th>
+          <th scope="col" class="num mm-col-cache">缓存写入</th>
+          <th scope="col" data-sort="source" class="mm-col-source">来源</th>
+          <th scope="col" class="mm-col-actions"><span class="sr-only">操作</span></th>
+        </tr>
+      </thead>
+      <tbody id="mm-tbody"></tbody>
+    </table>
+  </div>
+  <p class="mm-empty" id="mm-empty" hidden>没有符合条件的模型。<button type="button" class="link-btn" id="mm-empty-reset">恢复默认筛选</button></p>
+
+  <div class="mm-foot">
+    <span id="mm-summary">USD / 1M tokens</span>
+    <span id="mm-snapshot"></span>
+  </div>
+</section>
+
+<div id="view-all" hidden>
 
 <!-- Master Mode Switch Card (总开关) -->
 <section class="mode-card">
@@ -65,6 +131,12 @@
 
 <section class="models">
   <div class="models-head">
+    <div class="seg" role="tablist" id="filter-seg">
+      <button type="button" role="tab" data-filter="all" aria-selected="true">全部</button>
+      <button type="button" role="tab" data-filter="custom">自定义</button>
+      <button type="button" role="tab" data-filter="matched">已配公价</button>
+      <button type="button" role="tab" data-filter="unpriced">未定价</button>
+    </div>
     <input type="search" class="search-input" id="search-input" placeholder="搜索模型、渠道或厂商..." autocomplete="off">
     <button type="button" class="btn" id="btn-sync-all">✨ 全部应用公价</button>
   </div>
@@ -72,6 +144,7 @@
   <ul class="model-list" id="models-list"></ul>
   <p class="sub-desc" id="empty-hint" style="text-align: center; padding: 24px 0;" hidden>未找到符合条件的模型</p>
 </section>
+</div>
 
 <!-- Modal for Custom Price Editing -->
 <div class="modal-backdrop" id="edit-modal" hidden>
