@@ -33,8 +33,31 @@
     }
   }
 
-  // Load models data
-  const rawModels = window.__MAGPIE_MODELS_DATA__ || [];
+  // Load models data (bundled snapshot first; host may overwrite via models-live.js)
+  let rawModels = window.__MAGPIE_MODELS_DATA__ || [];
+
+  function loadPageScript(src) {
+    return new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.onload = () => { s.remove(); resolve(true); };
+      s.onerror = () => { s.remove(); resolve(false); };
+      document.head.appendChild(s);
+    });
+  }
+
+  // The page cannot scan Magpie's cache itself (CSP connect-src none).
+  // The host hook writes page/models-live.js; refresh reloads that file.
+  async function reloadModelsSnapshot() {
+    const ok = await loadPageScript("models-live.js?t=" + Date.now());
+    if (!ok) return { live: false, count: rawModels.length };
+    rawModels = window.__MAGPIE_MODELS_DATA__ || [];
+    return {
+      live: !!window.__MAGPIE_MODELS_DATA_LIVE__,
+      count: rawModels.length,
+      at: window.__MAGPIE_MODELS_DATA_AT__ || ""
+    };
+  }
   let customPrices = pluginOptions.customPrices || {};
   let globalMode = pluginOptions.mode || "all-equivalent"; // "all-equivalent" or "api-only"
   let filter = "all";
@@ -445,7 +468,7 @@
       const names = mm.missingProviders.slice(0, 3).map((p) => p.name || p.id);
       notes.push(mm.missingProviders.length + " 个已配置渠道不在本地模型快照中：" +
         names.join("、") + (mm.missingProviders.length > 3 ? " 等" : "") +
-        "。重新生成 models-data.js 后即可显示。");
+        "。宿主会自动扫描本机 Magpie 模型缓存；点「↻ 刷新配置」即可加载最新快照。");
     }
     if (mm.staleFavorites.length > 0) {
       notes.push(mm.staleFavorites.length + " 个收藏不在当前模型快照中，已保留，不会影响其他模型。");
@@ -926,8 +949,13 @@
         loadMyModelPrefs();
         renderModeUI();
       }
+      const snap = await reloadModelsSnapshot();
       await loadMyModels();
-      showToast("已重新读取 Magpie 渠道与本地配置");
+      renderStats();
+      renderList();
+      showToast(snap.live
+        ? ("已更新模型快照（" + snap.count + " 个）与 Magpie 渠道配置")
+        : "已重新读取 Magpie 渠道与本地配置（宿主快照尚未就绪，仍用随包快照）");
     } finally {
       $("mm-refresh").disabled = false;
     }
@@ -1000,6 +1028,7 @@
 
   loadMyModelPrefs();
   setView("mine");
+  await reloadModelsSnapshot();
   renderModeUI();
   renderStats();
   renderList();

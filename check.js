@@ -154,4 +154,31 @@ assert.deepStrictEqual(pruned.kept, ['a/one'], '有效收藏应保留');
 assert.deepStrictEqual(pruned.stale, ['gone/two'], '失效收藏应被识别而不是崩溃');
 console.log('   ✓ 对比分组、渠道重建与收藏安全处理正确');
 
-console.log('\n🎉 所有测试用例 100% 通过！兼容本地与 CI 环境。');
+// 9. Live snapshot writer used by Magpie host hooks
+console.log('9. 测试宿主实时模型快照写入...');
+(async () => {
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const { pathToFileURL } = require('url');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'magpie-models-price-live-'));
+  process.env.MAGPIE_MODELS_PRICE_PAGE = tmp;
+  const hooks = await import(pathToFileURL(path.join(__dirname, 'price.hooks.mjs')).href);
+  const first = hooks.writeSnapshot();
+  assert(first.ok, '首次写入实时快照应成功: ' + (first.error || ''));
+  const live = path.join(tmp, 'models-live.js');
+  assert(fs.existsSync(live), '应生成 page/models-live.js');
+  const body = fs.readFileSync(live, 'utf8');
+  assert(body.includes('window.__MAGPIE_MODELS_DATA__'), '快照应导出模型数组');
+  assert(body.includes('window.__MAGPIE_MODELS_DATA_LIVE__ = true'), '快照应标记为 live');
+  const second = hooks.writeSnapshot();
+  assert(second.ok && second.unchanged === true, '内容未变时应跳过重复写入');
+  hooks.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+  delete process.env.MAGPIE_MODELS_PRICE_PAGE;
+  console.log('   ✓ 宿主实时快照写入、幂等跳过与清理正确');
+  console.log('\n🎉 所有测试用例 100% 通过！兼容本地与 CI 环境。');
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

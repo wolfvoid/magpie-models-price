@@ -1,6 +1,6 @@
 {
   "name": "magpie-models-price",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Auto-match and custom-price Magpie models with models.dev official pricing database & real API spend switch",
   "bin": {
     "magpie-models-price": "index.js"
@@ -41,11 +41,13 @@
       "providers:list"
     ],
     "kind": "page",
-    "icon": "page/icon.svg"
+    "icon": "page/icon.svg",
+    "hooks": "./price.hooks.mjs"
   },
   "files": [
     "index.js",
     "matcher.js",
+    "price.hooks.mjs",
     "server.js",
     "public",
     "page",
