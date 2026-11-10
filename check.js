@@ -42,8 +42,35 @@ const statuses = matcher.getPricingStatus([
 assert(statuses.length === 2, '应该成功返回 2 个模型状态');
 console.log('   ✓ 状态检测校验通过');
 
-// 5. My Models: price parsing and source detection
-console.log('5. 测试 My Models 价格解析与来源识别...');
+// 5. 验证分时峰谷计算逻辑
+console.log('5. 测试峰谷分时时段计算与模型支持检测...');
+const dsPreset = matcher.hasOffPeakPreset('deepseek/deepseek-v3', 'deepseek');
+assert(dsPreset.supported === true && dsPreset.discount === 0.5, 'DeepSeek 应该支持峰谷');
+
+// 周六 (2026-11-14 10:00 UTC+8)
+const satDate = new Date('2026-11-14T02:00:00Z'); // 10:00 UTC+8
+const satStatus = matcher.checkOffPeakStatus(satDate);
+assert(satStatus.isOffPeak === true && satStatus.discount === 0.5, '周末全天应为闲时5折');
+
+// 工作日周一 10:30 UTC+8 (高峰)
+const monPeakDate = new Date('2026-11-09T02:30:00Z'); // 10:30 UTC+8
+const monPeakStatus = matcher.checkOffPeakStatus(monPeakDate);
+assert(monPeakStatus.isOffPeak === false, '周一上午10:30应为工作日高峰时段');
+
+// 工作日周一 13:00 UTC+8 (午休低谷)
+const monLunchDate = new Date('2026-11-09T05:00:00Z'); // 13:00 UTC+8
+const monLunchStatus = matcher.checkOffPeakStatus(monLunchDate);
+assert(monLunchStatus.isOffPeak === true && monLunchStatus.discount === 0.5, '周一中午13:00应为午休低谷');
+
+// 工作日周一 21:00 UTC+8 (夜间低谷)
+const monNightDate = new Date('2026-11-09T13:00:00Z'); // 21:00 UTC+8
+const monNightStatus = matcher.checkOffPeakStatus(monNightDate);
+assert(monNightStatus.isOffPeak === true && monNightStatus.discount === 0.5, '周一晚21:00应为夜间低谷');
+
+console.log('   ✓ 峰谷分时判断校验通过 (周末全天低谷、工作日午间/夜间闲时5折、上午/下午高峰)');
+
+// 6. My Models: price parsing and source detection
+console.log('6. 测试 My Models 价格解析与来源识别...');
 const parsedList = MM.parseCurrentPrice('List: $1.25/$5 in/out');
 assert(parsedList.source === 'list' && parsedList.input === 1.25 && parsedList.output === 5, 'List 价格应解析为渠道价');
 const parsedCustom = MM.parseCurrentPrice('Custom: $0.5/$3 in/out (cache: $0.05/$0.1)');
@@ -56,8 +83,8 @@ assert.strictEqual(MM.formatPrice(0.003), '$0.003', '小额缓存价格不应被
 assert.strictEqual(MM.formatPrice(null), '—', '未知价格应显示占位符');
 console.log('   ✓ 列表价、自定义价、免费价与未知价格区分正确');
 
-// 6. My Models: configured providers, custom precedence, reference-only
-console.log('6. 测试 My Models 渠道过滤与价格优先级...');
+// 7. My Models: configured providers, custom precedence, reference-only
+console.log('7. 测试 My Models 渠道过滤与价格优先级...');
 const fixtureModels = [
   {
     model: 'alpha/model-one', provider: 'alpha', providerName: 'Alpha', providerKind: 'api',
@@ -119,8 +146,8 @@ const subZero = MM.buildRows(fixtureModels, { providers: fixtureProviders, custo
 assert(subZero.price.source === 'subscription-zero' && subZero.price.input === 0, '仅真实 API 模式下订阅渠道应为 0');
 console.log('   ✓ 已配置渠道、自定义优先级、参考价与订阅口径正确');
 
-// 7. My Models: combined filters, search and sorting
-console.log('7. 测试 My Models 组合筛选与排序...');
+// 8. My Models: combined filters, search and sorting
+console.log('8. 测试 My Models 组合筛选与排序...');
 const filtered = MM.filterRows(rows, {
   providers: ['alpha', 'beta', 'gamma'],
   favorites: new Set(['beta/model-one']),
@@ -139,8 +166,8 @@ assert(sortedDesc[0].key === 'epsilon/model-one' && sortedDesc[0].price.input ==
 assert(MM.sortRows(rows, { key: 'provider', dir: 'asc' })[0].providerName === 'Alpha', '供应商升序应正确排序');
 console.log('   ✓ 搜索、渠道、收藏、未知价格筛选与升降序正确');
 
-// 8. My Models: comparison groups and persisted selection reconciliation
-console.log('8. 测试跨渠道对比与已保存筛选状态...');
+// 9. My Models: comparison groups and persisted selection reconciliation
+console.log('9. 测试跨渠道对比与已保存筛选状态...');
 const groups = MM.groupByModel(rows);
 const modelOne = groups.find((g) => g.bare === 'model-one');
 assert(modelOne && modelOne.providerCount === 4, '同一模型在四个渠道应可对比');
@@ -154,8 +181,8 @@ assert.deepStrictEqual(pruned.kept, ['a/one'], '有效收藏应保留');
 assert.deepStrictEqual(pruned.stale, ['gone/two'], '失效收藏应被识别而不是崩溃');
 console.log('   ✓ 对比分组、渠道重建与收藏安全处理正确');
 
-// 9. Live snapshot writer used by Magpie host hooks
-console.log('9. 测试宿主实时模型快照写入...');
+// 10. Live snapshot writer used by Magpie host hooks
+console.log('10. 测试宿主实时模型快照写入...');
 (async () => {
   const os = require('os');
   const fs = require('fs');

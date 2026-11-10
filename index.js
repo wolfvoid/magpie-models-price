@@ -48,8 +48,10 @@ if (require.main === module) {
       const report = matcher.scanAll();
       const unpriced = report.filter(r => r.isUnpriced);
       const priced = report.filter(r => !r.isUnpriced);
+      const offPeak = matcher.checkOffPeakStatus();
 
-      console.log(`📊 统计概览: 总模型 ${report.length} 个 | 已定价 ${priced.length} 个 | 未定价 ${unpriced.length} 个\n`);
+      console.log(`📊 统计概览: 总模型 ${report.length} 个 | 已定价 ${priced.length} 个 | 未定价 ${unpriced.length} 个`);
+      console.log(`⏰ 当前分时状态: ${offPeak.label} (${offPeak.isOffPeak ? '🌙 闲时低谷 5折生效中' : '⚡ 正常高峰时段'})\n`);
 
       if (unpriced.length === 0) {
         console.log('🎉 太棒了！当前所有模型均已有定价。');
