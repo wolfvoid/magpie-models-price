@@ -17,7 +17,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Run Unit Tests
         run: node check.js
@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write # 必填：用于 GitHub Actions OIDC Trusted Publishing (免密钥发包)
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,15 +36,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Publish to NPM
+      - name: Ensure latest npm with OIDC Trusted Publishing support
+        run: npm install -g npm@latest
+
+      - name: Publish to NPM via Trusted Publishing (OIDC)
         run: |
-          if [ -n "$NODE_AUTH_TOKEN" ]; then
-            npm publish --access public
+          if [ -n "$CUSTOM_TOKEN" ]; then
+            echo "Publishing with secret token..."
+            NODE_AUTH_TOKEN="$CUSTOM_TOKEN" npm publish --provenance --access public
           else
-            npm publish --access public --provenance || echo "Notice: Configure NPM_TOKEN in GitHub repository Secrets to auto-publish"
+            echo "Publishing via OIDC Trusted Publishing (Zero Secrets)..."
+            npm publish --provenance --access public
           fi
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CUSTOM_TOKEN: ${{ secrets.NPM_TOKEN }}
