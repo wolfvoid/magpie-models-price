@@ -18,12 +18,20 @@
   </h1>
   <div class="seg" role="tablist" id="filter-seg">
     <button type="button" role="tab" data-filter="all" aria-selected="true" data-i18n="tab_all">全部</button>
+    <button type="button" role="tab" data-filter="offpeak" data-i18n="tab_offpeak">峰谷定价</button>
     <button type="button" role="tab" data-filter="custom" data-i18n="tab_custom">自定义</button>
     <button type="button" role="tab" data-filter="matched" data-i18n="tab_matched">已配公价</button>
     <button type="button" role="tab" data-filter="unpriced" data-i18n="tab_unpriced">未定价</button>
   </div>
 </header>
-<p class="sub-desc" data-i18n="sub_desc">基于 models.dev 与 Magpie 账单系统，自动匹配与自定义价格即时生效于每日用量及托盘花费。</p>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 3px 0 14px; flex-wrap: wrap;">
+  <p class="sub-desc" style="margin: 0;" data-i18n="sub_desc">基于 models.dev 与 Magpie 账单系统，自动匹配与自定义价格即时生效于每日用量及托盘花费。</p>
+  <div class="peak-status-bar" id="peak-status-bar" title="北京时间 (UTC+8) 分时峰谷时段">
+    <span class="peak-dot" id="peak-dot"></span>
+    <span class="peak-text" id="peak-text" data-i18n="peak_badge_live">⚡ 当前高峰时段</span>
+    <span class="peak-time" id="peak-time"></span>
+  </div>
+</div>
 
 <!-- Master Mode Switch Card (总开关) -->
 <section class="mode-card">
@@ -105,6 +113,29 @@
     <div class="form-group">
       <label data-i18n="cache_write_label">缓存写入单价 (Cache Write per 1M):</label>
       <input type="number" step="0.0001" id="cache-write-cost" placeholder="如 0.14" data-i18n-placeholder="cache_write_ph">
+    </div>
+
+    <!-- 峰谷分时计价扩展配置 -->
+    <div class="form-group" style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line);">
+      <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;">
+        <span style="font-weight: 600; color: var(--fg);"><span data-i18n="offpeak_toggle_label">启用分时峰谷定价 (Peak & Off-Peak)</span></span>
+        <input type="checkbox" id="offpeak-enabled" style="width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer;">
+      </label>
+      <div id="offpeak-details" hidden style="margin-top: 8px;">
+        <p style="font-size: 11px; color: var(--muted); margin-bottom: 8px;" data-i18n="offpeak_schedule_desc">
+          工作日 09:00-12:00 / 14:00-18:00 为高峰；其余时间（夜间 18:00-09:00、午休 12:00-14:00 及周末假日全天）立享 5 折优惠。
+        </p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div>
+            <label style="font-size: 11px;" data-i18n="offpeak_input_label">低谷输入单价 (Off-Peak In):</label>
+            <input type="number" step="0.0001" id="offpeak-input-cost" placeholder="0.07" data-i18n-placeholder="offpeak_input_ph">
+          </div>
+          <div>
+            <label style="font-size: 11px;" data-i18n="offpeak_output_label">低谷输出单价 (Off-Peak Out):</label>
+            <input type="number" step="0.0001" id="offpeak-output-cost" placeholder="0.14" data-i18n-placeholder="offpeak_output_ph">
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="modal-foot">

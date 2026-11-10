@@ -253,6 +253,7 @@ function scanAll() {
   const report = [];
   for (const s of statuses) {
     const matchResult = matchModel(s.model, catalog);
+    const preset = hasOffPeakPreset(s.model, s.modelObj.provider);
     report.push({
       model: s.model,
       name: s.modelObj.name,
@@ -261,6 +262,7 @@ function scanAll() {
       providerKind: s.modelObj.providerKind,
       isUnpriced: s.isUnpriced,
       currentPrice: s.priceInfo,
+      offPeakPreset: preset,
       matched: matchResult ? {
         provider: matchResult.match.provider,
         model: matchResult.match.model,
@@ -367,6 +369,91 @@ function applyGlobalMode(mode, customOverrides = {}) {
   return Object.keys(newPrices).length;
 }
 
+/**
+ * Peak & Off-Peak (分时峰谷) calculation helpers
+ */
+function getBeijingTime(date = new Date()) {
+  const utc = date.getTime() + date.getTimezoneOffset() * 60000;
+  return new Date(utc + 3600000 * 8);
+}
+
+function checkOffPeakStatus(date = new Date(), rule = 'deepseek') {
+  const bj = getBeijingTime(date);
+  const day = bj.getDay(); // 0 is Sun, 6 is Sat
+  const hour = bj.getHours();
+  const min = bj.getMinutes();
+  const t = hour + min / 60;
+
+  if (rule === 'night_22_08') {
+    const isOff = t >= 22 || t < 8;
+    return {
+      isOffPeak: isOff,
+      rule,
+      discount: isOff ? 0.5 : 1.0,
+      hour,
+      min,
+      day,
+      label: isOff ? '夜间闲时 (22:00-08:00)' : '白天正常'
+    };
+  }
+
+  // DeepSeek official rule:
+  // Weekend: all day off-peak (50% discount)
+  if (day === 0 || day === 6) {
+    return {
+      isOffPeak: true,
+      rule: 'deepseek',
+      reason: 'weekend',
+      discount: 0.5,
+      hour,
+      min,
+      day,
+      label: '周末全天闲时 (5折)'
+    };
+  }
+
+  // Workdays:
+  // Peak: 09:00 - 12:00, 14:00 - 18:00
+  // Off-peak: 00:00 - 09:00, 12:00 - 14:00, 18:00 - 24:00
+  const isPeak = (t >= 9 && t < 12) || (t >= 14 && t < 18);
+  return {
+    isOffPeak: !isPeak,
+    rule: 'deepseek',
+    reason: isPeak ? 'workday_peak' : (t >= 12 && t < 14 ? 'lunch_offpeak' : 'night_offpeak'),
+    discount: !isPeak ? 0.5 : 1.0,
+    hour,
+    min,
+    day,
+    label: isPeak ? '工作日高峰时段' : '闲时低谷时段 (5折)'
+  };
+}
+
+function hasOffPeakPreset(modelName = '', provider = '') {
+  const m = (modelName || '').toLowerCase();
+  const p = (provider || '').toLowerCase();
+  if (m.includes('deepseek') || p.includes('deepseek')) {
+    return {
+      supported: true,
+      provider: 'deepseek',
+      rule: 'deepseek',
+      discount: 0.5,
+      name: 'DeepSeek 官方峰谷 (闲时5折)'
+    };
+  }
+  if (m.includes('qwen') || p.includes('alibaba') || p.includes('bailian')) {
+    return {
+      supported: true,
+      provider: 'alibaba',
+      rule: 'deepseek',
+      discount: 0.5,
+      name: '百炼/千问 闲时策略'
+    };
+  }
+  return {
+    supported: false
+  };
+}
+
 module.exports = {
   loadCatalog,
   getMagpieModels,
@@ -376,5 +463,8 @@ module.exports = {
   scanAll,
   applyPrice,
   resetPrice,
-  applyGlobalMode
+  applyGlobalMode,
+  getBeijingTime,
+  checkOffPeakStatus,
+  hasOffPeakPreset
 };

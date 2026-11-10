@@ -1,4 +1,4 @@
-// app.js - Model Prices Controller with Master Mode Switch, Scope support & Full i18n/White-border Fix
+// app.js - Model Prices Controller with Master Mode Switch, Scope, Time-of-Use Peak/Off-Peak Pricing & Full i18n
 (async () => {
   const $ = (id) => document.getElementById(id);
   const { t, setLocale, onLocaleChange, getLocale } = window.I18N_MODULE || {
@@ -30,7 +30,7 @@
   let editingModel = null;
   let selectedScope = "specific";
 
-  // 1. 初始化 Magpie 宿主与插件通信规范 (Host PostMessage Handshake & Theme/Locale Sync)
+  // 1. 初始化 Magpie 宿主通信规范 (Host PostMessage Handshake & Theme/Locale Sync)
   function initMagpieHostSync() {
     let callId = 1;
     const pendingCalls = new Map();
@@ -121,44 +121,131 @@
     return fullName.includes("/") ? fullName.split("/")[1] : fullName;
   }
 
-  function getModelPrice(item) {
-    if (globalMode === "api-only" && item.providerKind === "subscription") {
-      const specificCustom = customPrices[item.model];
-      if (specificCustom) {
-        return {
-          type: "custom",
-          scope: "specific",
-          input: specificCustom.input,
-          output: specificCustom.output,
-          cache_read: specificCustom.cache_read,
-          cache_write: specificCustom.cache_write
-        };
-      }
-      return null;
-    }
+  // 3. 峰谷分时时段计算 (Time-of-Use & DeepSeek Official Schedule)
+  function getBeijingTime(date = new Date()) {
+    const utc = date.getTime() + date.getTimezoneOffset() * 60000;
+    return new Date(utc + 3600000 * 8);
+  }
 
-    const specificCustom = customPrices[item.model];
-    if (specificCustom) {
+  function checkOffPeakStatus(date = new Date()) {
+    const bj = getBeijingTime(date);
+    const day = bj.getDay(); // 0 是周日, 6 是周六
+    const hour = bj.getHours();
+    const min = bj.getMinutes();
+    const t = hour + min / 60;
+    const timeStr = `${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+
+    // 周末全天均为低谷闲时 (立享 5 折)
+    if (day === 0 || day === 6) {
       return {
-        type: "custom",
-        scope: "specific",
-        input: specificCustom.input,
-        output: specificCustom.output,
-        cache_read: specificCustom.cache_read,
-        cache_write: specificCustom.cache_write
+        isOffPeak: true,
+        discount: 0.5,
+        hour,
+        min,
+        day,
+        timeStr,
+        reason: "weekend"
       };
     }
 
+    // 工作日：高峰为 09:00-12:00 与 14:00-18:00；其余时段为低谷闲时
+    const isPeak = (t >= 9 && t < 12) || (t >= 14 && t < 18);
+    return {
+      isOffPeak: !isPeak,
+      discount: !isPeak ? 0.5 : 1.0,
+      hour,
+      min,
+      day,
+      timeStr,
+      reason: isPeak ? "workday_peak" : t >= 12 && t < 14 ? "lunch" : "night"
+    };
+  }
+
+  function updatePeakStatusBar() {
+    const status = checkOffPeakStatus();
+    const bar = $("peak-status-bar");
+    const text = $("peak-text");
+    const time = $("peak-time");
+    if (!bar || !text) return;
+
+    if (status.isOffPeak) {
+      bar.className = "peak-status-bar is-offpeak";
+      text.textContent = t("offpeak_badge_live");
+    } else {
+      bar.className = "peak-status-bar is-peak";
+      text.textContent = t("peak_badge_live");
+    }
+    if (time) {
+      time.textContent = `UTC+8 ${status.timeStr}`;
+    }
+  }
+
+  // 4. 定价计算 (含实时峰谷切换)
+  function getModelPrice(item) {
+    const currentStatus = checkOffPeakStatus();
+    const isSub = item.providerKind === "subscription";
+
+    const specificCustom = customPrices[item.model];
     const bare = getBareModel(item.model);
     const wildcardCustom = customPrices["*/" + bare];
-    if (wildcardCustom) {
+    const custom = specificCustom || wildcardCustom;
+    const scope = specificCustom ? "specific" : wildcardCustom ? "wildcard" : null;
+
+    if (globalMode === "api-only" && isSub && !specificCustom) {
+      return null;
+    }
+
+    // 自定义定价
+    if (custom) {
+      const hasOffPeak = !!(custom.offpeak?.enabled || item.offPeakPreset?.supported);
+      const peakIn = custom.input;
+      const peakOut = custom.output;
+      const offIn = custom.offpeak?.input ?? +(peakIn * 0.5).toFixed(5);
+      const offOut = custom.offpeak?.output ?? +(peakOut * 0.5).toFixed(5);
+
+      const effectiveIn = hasOffPeak && currentStatus.isOffPeak ? offIn : peakIn;
+      const effectiveOut = hasOffPeak && currentStatus.isOffPeak ? offOut : peakOut;
+
       return {
         type: "custom",
-        scope: "wildcard",
-        input: wildcardCustom.input,
-        output: wildcardCustom.output,
-        cache_read: wildcardCustom.cache_read,
-        cache_write: wildcardCustom.cache_write
+        scope,
+        input: effectiveIn,
+        output: effectiveOut,
+        cache_read: custom.cache_read,
+        cache_write: custom.cache_write,
+        hasOffPeak,
+        isOffPeakActive: currentStatus.isOffPeak,
+        peakInput: peakIn,
+        peakOutput: peakOut,
+        offPeakInput: offIn,
+        offPeakOutput: offOut
+      };
+    }
+
+    // 官方匹配公价 (若为 DeepSeek 等模型，自动计算峰谷)
+    if (item.matched && item.matched.cost) {
+      const c = item.matched.cost;
+      const hasOffPeak = !!item.offPeakPreset?.supported;
+      const peakIn = c.input;
+      const peakOut = c.output;
+      const offIn = +(peakIn * 0.5).toFixed(5);
+      const offOut = +(peakOut * 0.5).toFixed(5);
+
+      const effectiveIn = hasOffPeak && currentStatus.isOffPeak ? offIn : peakIn;
+      const effectiveOut = hasOffPeak && currentStatus.isOffPeak ? offOut : peakOut;
+
+      return {
+        type: "matched",
+        input: effectiveIn,
+        output: effectiveOut,
+        cache_read: c.cache_read,
+        cache_write: c.cache_write,
+        hasOffPeak,
+        isOffPeakActive: currentStatus.isOffPeak,
+        peakInput: peakIn,
+        peakOutput: peakOut,
+        offPeakInput: offIn,
+        offPeakOutput: offOut
       };
     }
 
@@ -217,6 +304,11 @@
       list = list.filter((m) => !getModelPrice(m));
     } else if (filter === "matched") {
       list = list.filter((m) => !!m.matched);
+    } else if (filter === "offpeak") {
+      list = list.filter((m) => {
+        const p = getModelPrice(m);
+        return (p && p.hasOffPeak) || (m.offPeakPreset && m.offPeakPreset.supported);
+      });
     }
 
     if (search.trim()) {
@@ -250,12 +342,17 @@
         ? `<span style="font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; margin-left: 5px;">${escapeHtml(t("badge_subscription"))}</span>`
         : `<span style="font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 4px; margin-left: 5px;">${escapeHtml(t("badge_paid_api"))}</span>`;
 
+      const offPeakTag = item.offPeakPreset?.supported
+        ? `<span style="font-size: 10px; color: var(--green); border: 1px solid rgba(48, 209, 88, 0.3); border-radius: 3px; padding: 0 4px; margin-left: 5px;" title="${escapeHtml(item.offPeakPreset.name)}">${escapeHtml(t("badge_offpeak_supported"))}</span>`
+        : "";
+
       const infoDiv = document.createElement("div");
       infoDiv.className = "item-info";
       infoDiv.innerHTML =
         '<div class="m-name">' +
         escapeHtml(item.model) +
         kindBadge +
+        offPeakTag +
         "</div>" +
         '<div class="m-sub">' +
         escapeHtml(item.name || "") +
@@ -293,20 +390,38 @@
       const priceCol = document.createElement("div");
       priceCol.className = "price-col";
 
-      if (current && current.type === "custom") {
+      if (current && (current.type === "custom" || current.type === "matched")) {
         const scopeBadge =
-          current.scope === "wildcard"
-            ? `<span class="badge-tag badge-custom" title="${escapeHtml(t("scope_wildcard_badge_title"))}">${escapeHtml(t("scope_wildcard_badge"))}</span>`
-            : `<span class="badge-tag badge-custom" title="${escapeHtml(t("scope_specific_badge_title"))}">${escapeHtml(t("scope_specific_badge"))}</span>`;
+          current.type === "custom"
+            ? current.scope === "wildcard"
+              ? `<span class="badge-tag badge-custom" title="${escapeHtml(t("scope_wildcard_badge_title"))}">${escapeHtml(t("scope_wildcard_badge"))}</span>`
+              : `<span class="badge-tag badge-custom" title="${escapeHtml(t("scope_specific_badge_title"))}">${escapeHtml(t("scope_specific_badge"))}</span>`
+            : "";
 
-        priceCol.innerHTML =
-          '<span class="rate">$' +
-          current.input +
-          " / $" +
-          current.output +
-          "</span>" +
-          scopeBadge +
-          `<span class="cache">${escapeHtml(t("cache_label"))} $${current.cache_read}/$${current.cache_write}</span>`;
+        if (current.hasOffPeak) {
+          const peakLabel = t("peak_tag");
+          const offpeakLabel = t("offpeak_tag");
+          const statusBadge = current.isOffPeakActive
+            ? `<span class="badge-tag badge-offpeak" title="当前时段按闲时 5 折计算">$${current.offPeakInput}/$${current.offPeakOutput} (${escapeHtml(t("badge_offpeak_active"))})</span>`
+            : `<span class="badge-tag badge-peak" title="当前时段按高峰标准单价计算">$${current.peakInput}/$${current.peakOutput} (${escapeHtml(t("badge_peak_active"))})</span>`;
+
+          priceCol.innerHTML =
+            `<span class="rate">${peakLabel} $${current.peakInput}/$${current.peakOutput}</span>` +
+            `<span class="rate-offpeak">${offpeakLabel} $${current.offPeakInput}/$${current.offPeakOutput} (50% OFF)</span>` +
+            statusBadge +
+            scopeBadge +
+            `<span class="cache">${escapeHtml(t("cache_label"))} $${current.cache_read}/$${current.cache_write}</span>`;
+        } else {
+          priceCol.innerHTML =
+            '<span class="rate">$' +
+            current.input +
+            " / $" +
+            current.output +
+            "</span>" +
+            scopeBadge +
+            `<span class="badge-tag badge-modelsdev">${escapeHtml(t("badge_active"))}</span>` +
+            `<span class="cache">${escapeHtml(t("cache_label"))} $${current.cache_read}/$${current.cache_write}</span>`;
+        }
       } else if (current && current.type === "current") {
         priceCol.innerHTML =
           '<span class="rate" style="color: var(--green);">' +
@@ -352,7 +467,7 @@
       .replace(/'/g, "&#039;");
   }
 
-  // Edit Modal logic
+  // 5. 编辑定价弹窗交互
   function openEditModal(item) {
     editingModel = item;
     const bare = getBareModel(item.model);
@@ -371,21 +486,42 @@
     }
 
     const current = getModelPrice(item);
-    if (current && current.type === "custom") {
-      $("input-cost").value = current.input;
-      $("output-cost").value = current.output;
-      $("cache-read-cost").value = current.cache_read;
-      $("cache-write-cost").value = current.cache_write;
+    const specificCustom = customPrices[item.model];
+    const wildcardCustom = customPrices["*/" + bare];
+    const custom = specificCustom || wildcardCustom;
+
+    if (custom) {
+      $("input-cost").value = custom.input;
+      $("output-cost").value = custom.output;
+      $("cache-read-cost").value = custom.cache_read;
+      $("cache-write-cost").value = custom.cache_write;
+
+      const hasOffPeak = !!(custom.offpeak?.enabled || item.offPeakPreset?.supported);
+      $("offpeak-enabled").checked = hasOffPeak;
+      $("offpeak-details").hidden = !hasOffPeak;
+      $("offpeak-input-cost").value = custom.offpeak?.input ?? +(custom.input * 0.5).toFixed(5);
+      $("offpeak-output-cost").value = custom.offpeak?.output ?? +(custom.output * 0.5).toFixed(5);
     } else if (item.matched) {
-      $("input-cost").value = item.matched.cost.input;
-      $("output-cost").value = item.matched.cost.output;
-      $("cache-read-cost").value = item.matched.cost.cache_read;
-      $("cache-write-cost").value = item.matched.cost.cache_write;
+      const c = item.matched.cost;
+      $("input-cost").value = c.input;
+      $("output-cost").value = c.output;
+      $("cache-read-cost").value = c.cache_read;
+      $("cache-write-cost").value = c.cache_write;
+
+      const hasOffPeak = !!item.offPeakPreset?.supported;
+      $("offpeak-enabled").checked = hasOffPeak;
+      $("offpeak-details").hidden = !hasOffPeak;
+      $("offpeak-input-cost").value = +(c.input * 0.5).toFixed(5);
+      $("offpeak-output-cost").value = +(c.output * 0.5).toFixed(5);
     } else {
       $("input-cost").value = "0";
       $("output-cost").value = "0";
       $("cache-read-cost").value = "0";
       $("cache-write-cost").value = "0";
+      $("offpeak-enabled").checked = false;
+      $("offpeak-details").hidden = true;
+      $("offpeak-input-cost").value = "0";
+      $("offpeak-output-cost").value = "0";
     }
 
     $("edit-modal").hidden = false;
@@ -419,12 +555,24 @@
     const bare = getBareModel(editingModel.model);
     const targetKey = selectedScope === "wildcard" ? "*/" + bare : editingModel.model;
 
+    const inVal = parseFloat($("input-cost").value) || 0;
+    const outVal = parseFloat($("output-cost").value) || 0;
+
     const priceObj = {
-      input: parseFloat($("input-cost").value) || 0,
-      output: parseFloat($("output-cost").value) || 0,
+      input: inVal,
+      output: outVal,
       cache_read: parseFloat($("cache-read-cost").value) || 0,
       cache_write: parseFloat($("cache-write-cost").value) || 0
     };
+
+    if ($("offpeak-enabled").checked) {
+      priceObj.offpeak = {
+        enabled: true,
+        rule: "deepseek",
+        input: parseFloat($("offpeak-input-cost").value) || +(inVal * 0.5).toFixed(5),
+        output: parseFloat($("offpeak-output-cost").value) || +(outVal * 0.5).toFixed(5)
+      };
+    }
 
     customPrices[targetKey] = priceObj;
 
@@ -475,13 +623,21 @@
 
   async function syncAllMatched() {
     let count = 0;
+    const currentStatus = checkOffPeakStatus();
     for (const m of rawModels) {
       if (m.matched) {
+        const hasOffPeak = !!m.offPeakPreset?.supported;
+        const peakIn = m.matched.cost.input;
+        const peakOut = m.matched.cost.output;
+        const offIn = +(peakIn * 0.5).toFixed(5);
+        const offOut = +(peakOut * 0.5).toFixed(5);
+
         customPrices[m.model] = {
-          input: m.matched.cost.input,
-          output: m.matched.cost.output,
+          input: peakIn,
+          output: peakOut,
           cache_read: m.matched.cost.cache_read,
-          cache_write: m.matched.cost.cache_write
+          cache_write: m.matched.cost.cache_write,
+          ...(hasOffPeak ? { offpeak: { enabled: true, rule: "deepseek", input: offIn, output: offOut } } : {})
         };
         count++;
       }
@@ -492,7 +648,7 @@
     showToast(t("toast_sync_all", { count }));
   }
 
-  // Event handlers
+  // 6. 事件绑定
   $("filter-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("button");
     if (!btn) return;
@@ -537,15 +693,49 @@
 
   $("modal-btn-match").addEventListener("click", () => {
     if (editingModel && editingModel.matched) {
-      $("input-cost").value = editingModel.matched.cost.input;
-      $("output-cost").value = editingModel.matched.cost.output;
-      $("cache-read-cost").value = editingModel.matched.cost.cache_read;
-      $("cache-write-cost").value = editingModel.matched.cost.cache_write;
+      const c = editingModel.matched.cost;
+      $("input-cost").value = c.input;
+      $("output-cost").value = c.output;
+      $("cache-read-cost").value = c.cache_read;
+      $("cache-write-cost").value = c.cache_write;
+      if ($("offpeak-enabled").checked) {
+        $("offpeak-input-cost").value = +(c.input * 0.5).toFixed(5);
+        $("offpeak-output-cost").value = +(c.output * 0.5).toFixed(5);
+      }
+    }
+  });
+
+  $("offpeak-enabled").addEventListener("change", (e) => {
+    $("offpeak-details").hidden = !e.target.checked;
+    if (e.target.checked) {
+      const inVal = parseFloat($("input-cost").value) || 0;
+      const outVal = parseFloat($("output-cost").value) || 0;
+      if (!parseFloat($("offpeak-input-cost").value)) {
+        $("offpeak-input-cost").value = +(inVal * 0.5).toFixed(5);
+      }
+      if (!parseFloat($("offpeak-output-cost").value)) {
+        $("offpeak-output-cost").value = +(outVal * 0.5).toFixed(5);
+      }
+    }
+  });
+
+  $("input-cost").addEventListener("input", () => {
+    if ($("offpeak-enabled").checked) {
+      const inVal = parseFloat($("input-cost").value) || 0;
+      $("offpeak-input-cost").value = +(inVal * 0.5).toFixed(5);
+    }
+  });
+
+  $("output-cost").addEventListener("input", () => {
+    if ($("offpeak-enabled").checked) {
+      const outVal = parseFloat($("output-cost").value) || 0;
+      $("offpeak-output-cost").value = +(outVal * 0.5).toFixed(5);
     }
   });
 
   // 当语言切换时，触发全量 UI 重新渲染
   onLocaleChange(() => {
+    updatePeakStatusBar();
     renderModeUI();
     renderStats();
     renderList();
@@ -558,7 +748,11 @@
     }
   });
 
+  // 定时更新峰谷状态胶囊 (每 30 秒)
+  setInterval(updatePeakStatusBar, 30000);
+
   // 初始渲染
+  updatePeakStatusBar();
   renderModeUI();
   renderStats();
   renderList();

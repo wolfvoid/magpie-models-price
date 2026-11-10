@@ -41,4 +41,31 @@ const statuses = matcher.getPricingStatus([
 assert(statuses.length === 2, '应该成功返回 2 个模型状态');
 console.log('   ✓ 状态检测校验通过');
 
+// 5. 验证分时峰谷计算逻辑
+console.log('5. 测试峰谷分时时段计算与模型支持检测...');
+const dsPreset = matcher.hasOffPeakPreset('deepseek/deepseek-v3', 'deepseek');
+assert(dsPreset.supported === true && dsPreset.discount === 0.5, 'DeepSeek 应该支持峰谷');
+
+// 周六 (2026-11-14 10:00 UTC+8)
+const satDate = new Date('2026-11-14T02:00:00Z'); // 10:00 UTC+8
+const satStatus = matcher.checkOffPeakStatus(satDate);
+assert(satStatus.isOffPeak === true && satStatus.discount === 0.5, '周末全天应为闲时5折');
+
+// 工作日周一 10:30 UTC+8 (高峰)
+const monPeakDate = new Date('2026-11-09T02:30:00Z'); // 10:30 UTC+8
+const monPeakStatus = matcher.checkOffPeakStatus(monPeakDate);
+assert(monPeakStatus.isOffPeak === false, '周一上午10:30应为工作日高峰时段');
+
+// 工作日周一 13:00 UTC+8 (午休低谷)
+const monLunchDate = new Date('2026-11-09T05:00:00Z'); // 13:00 UTC+8
+const monLunchStatus = matcher.checkOffPeakStatus(monLunchDate);
+assert(monLunchStatus.isOffPeak === true && monLunchStatus.discount === 0.5, '周一中午13:00应为午休低谷');
+
+// 工作日周一 21:00 UTC+8 (夜间低谷)
+const monNightDate = new Date('2026-11-09T13:00:00Z'); // 21:00 UTC+8
+const monNightStatus = matcher.checkOffPeakStatus(monNightDate);
+assert(monNightStatus.isOffPeak === true && monNightStatus.discount === 0.5, '周一晚21:00应为夜间低谷');
+
+console.log('   ✓ 峰谷分时判断校验通过 (周末全天低谷、工作日午间/夜间闲时5折、上午/下午高峰)');
+
 console.log('\n🎉 所有测试用例 100% 通过！兼容本地与 CI 环境。');

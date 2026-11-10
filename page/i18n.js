@@ -1,4 +1,4 @@
-// i18n.js - Model Prices 国际化语言包与控制器 (zh, zh-TW, en, ja)
+// i18n.js - Model Prices 国际化语言包与控制器 (zh, zh-TW, en, ja) - 含峰谷分时计价
 
 (function () {
   const I18N = {
@@ -9,6 +9,7 @@
       tab_custom: "自定义",
       tab_matched: "已配公价",
       tab_unpriced: "未定价",
+      tab_offpeak: "峰谷定价",
       sub_desc: "基于 models.dev 与 Magpie 账单系统，自动匹配与自定义价格即时生效于每日用量及托盘花费。",
       mode_title: "账单统计口径 (全局计价模式):",
       mode_btn_all: "🌐 显示所有提供商等值公价",
@@ -64,7 +65,25 @@
       toast_rate_reset: "已重置 {model} 定价",
       toast_mode_api: "已切换为：仅计费真实付费 API",
       toast_mode_all: "已切换为：显示所有渠道等值公价",
-      toast_sync_all: "已应用 {count} 个匹配模型公价"
+      toast_sync_all: "已应用 {count} 个匹配模型公价",
+
+      // 峰谷分时计价词条 (Peak & Off-Peak)
+      peak_badge_live: "⚡ 当前高峰时段",
+      offpeak_badge_live: "🌙 当前低谷闲时 (5折生效中)",
+      offpeak_desc_banner: "分时计费：工作日 09:00-12:00, 14:00-18:00 为高峰；夜间、午间及周末节假日全天自动按闲时 50% 折扣计算。",
+      badge_offpeak_supported: "支持峰谷",
+      badge_offpeak_active: "🌙 闲时生效中",
+      badge_peak_active: "⚡ 高峰生效中",
+      peak_tag: "峰:",
+      offpeak_tag: "谷:",
+      offpeak_toggle_label: "启用分时峰谷计价 (Peak & Off-Peak)",
+      offpeak_preset_ds: "DeepSeek 官方时段 (闲时 5 折)",
+      offpeak_preset_custom: "自定义低谷单价",
+      offpeak_schedule_desc: "工作日 09:00-12:00 / 14:00-18:00 为高峰；其余时间（夜间 18:00-09:00、午休 12:00-14:00 及周末假日全天）立享 5 折优惠。",
+      offpeak_input_label: "低谷输入单价 (Off-Peak In):",
+      offpeak_output_label: "低谷输出单价 (Off-Peak Out):",
+      offpeak_input_ph: "低谷输入单价 (如 0.07)",
+      offpeak_output_ph: "低谷输出单价 (如 0.14)"
     },
     "zh-TW": {
       title: "模型價格",
@@ -73,6 +92,7 @@
       tab_custom: "自訂",
       tab_matched: "已配公價",
       tab_unpriced: "未定價",
+      tab_offpeak: "峰谷定價",
       sub_desc: "基於 models.dev 與 Magpie 帳單系統，自動匹配與自訂價格即時生效於每日用量及工具列花費。",
       mode_title: "帳單統計口徑 (全域計價模式):",
       mode_btn_all: "🌐 顯示所有提供商等值公價",
@@ -128,7 +148,25 @@
       toast_rate_reset: "已重設 {model} 定價",
       toast_mode_api: "已切換為：僅計費真實付費 API",
       toast_mode_all: "已切換為：顯示所有渠道等值公價",
-      toast_sync_all: "已套用 {count} 個匹配模型公價"
+      toast_sync_all: "已套用 {count} 個匹配模型公價",
+
+      // 峰谷分時詞條
+      peak_badge_live: "⚡ 當前高峰時段",
+      offpeak_badge_live: "🌙 當前離峰低谷 (5折生效中)",
+      offpeak_desc_banner: "分時計費：工作日 09:00-12:00, 14:00-18:00 為高峰；夜間、午間及週末節假日全天自動按閒時 50% 折扣計算。",
+      badge_offpeak_supported: "支援峰谷",
+      badge_offpeak_active: "🌙 閒時生效中",
+      badge_peak_active: "⚡ 高峰生效中",
+      peak_tag: "峰:",
+      offpeak_tag: "谷:",
+      offpeak_toggle_label: "啟用分時峰谷計價 (Peak & Off-Peak)",
+      offpeak_preset_ds: "DeepSeek 官方時段 (閒時 5 折)",
+      offpeak_preset_custom: "自訂低谷單價",
+      offpeak_schedule_desc: "工作日 09:00-12:00 / 14:00-18:00 為高峰；其餘時間（夜間 18:00-09:00、午休 12:00-14:00 及週末假日全天）立享 5 折優惠。",
+      offpeak_input_label: "低谷輸入單價 (Off-Peak In):",
+      offpeak_output_label: "低谷輸出單價 (Off-Peak Out):",
+      offpeak_input_ph: "低谷輸入單價 (如 0.07)",
+      offpeak_output_ph: "低谷輸出單價 (如 0.14)"
     },
     "en": {
       title: "Model Prices",
@@ -137,6 +175,7 @@
       tab_custom: "Custom",
       tab_matched: "Matched",
       tab_unpriced: "Unpriced",
+      tab_offpeak: "Time-of-Use",
       sub_desc: "Auto-match and custom-price models via models.dev; changes apply immediately to daily usage and tray spend.",
       mode_title: "Billing Metric (Global Pricing Mode):",
       mode_btn_all: "🌐 All Providers Market Price",
@@ -192,7 +231,25 @@
       toast_rate_reset: "Reset pricing for {model}",
       toast_mode_api: "Switched to: Only bill actual paid APIs",
       toast_mode_all: "Switched to: Show equivalent market price for all providers",
-      toast_sync_all: "Applied market prices to {count} matched models"
+      toast_sync_all: "Applied market prices to {count} matched models",
+
+      // Peak & Off-Peak terms
+      peak_badge_live: "⚡ Peak Hours Active",
+      offpeak_badge_live: "🌙 Off-Peak Active (50% OFF)",
+      offpeak_desc_banner: "Time-of-Use: Weekdays 09:00-12:00, 14:00-18:00 (UTC+8) are Peak; nights, lunch, weekends & holidays are automatically discounted by 50%.",
+      badge_offpeak_supported: "Time-of-Use",
+      badge_offpeak_active: "🌙 Off-Peak Active",
+      badge_peak_active: "⚡ Peak Active",
+      peak_tag: "Peak:",
+      offpeak_tag: "Off-Peak:",
+      offpeak_toggle_label: "Enable Peak & Off-Peak Pricing",
+      offpeak_preset_ds: "DeepSeek Official Schedule (50% OFF)",
+      offpeak_preset_custom: "Custom Off-Peak Rates",
+      offpeak_schedule_desc: "Peak: Weekdays 09:00-12:00 / 14:00-18:00. Off-Peak: 18:00-09:00, 12:00-14:00, weekends & holidays (enjoy 50% discount).",
+      offpeak_input_label: "Off-Peak Input per 1M:",
+      offpeak_output_label: "Off-Peak Output per 1M:",
+      offpeak_input_ph: "Off-peak in (e.g. 0.07)",
+      offpeak_output_ph: "Off-peak out (e.g. 0.14)"
     },
     "ja": {
       title: "モデル価格",
@@ -201,6 +258,7 @@
       tab_custom: "カスタム",
       tab_matched: "公定価格一致",
       tab_unpriced: "未設定",
+      tab_offpeak: "時間帯別",
       sub_desc: "models.dev と Magpie 請求システムに基づいて、自動マッチングおよびカスタム価格が毎日の使用量とトレイの支出に即座に反映されます。",
       mode_title: "請求統計基準 (グローバル価格モード):",
       mode_btn_all: "🌐 全プロバイダー同等市場価格を表示",
@@ -240,7 +298,7 @@
       scope_specific: "現在のプロバイダーのみ",
       scope_wildcard: "任意のプロバイダー (*)",
       scope_hint_specific: "【現在のプロバイダーのみ】：設定価格は選択中の {model} にのみ適用され、他のプロバイダーは影響を受けません。",
-      scope_hint_wildcard: "【任意のプロバイダー】：価格は */{model} として保存され、このモデルを提供するすべてのプロバイダーで統一計算されます！",
+      scope_hint_wildcard: "【任意のプロバイダー】：価格は */{model} として保存され、这个模型を提供するすべてのプロバイダーで統一計算されます！",
       input_cost_label: "入力単価 (Input Cost per 1M):",
       input_cost_ph: "例: 0.14",
       output_cost_label: "出力単価 (Output Cost per 1M):",
@@ -256,7 +314,25 @@
       toast_rate_reset: "{model} の価格をリセットしました",
       toast_mode_api: "有料APIの実利用料金のみ記録に変更しました",
       toast_mode_all: "全プロバイダー同等市場価格の表示に変更しました",
-      toast_sync_all: "{count} 件の一致モデルに公定価格を適用しました"
+      toast_sync_all: "{count} 件の一致モデルに公定価格を適用しました",
+
+      // ピーク/オフピーク用語
+      peak_badge_live: "⚡ 現在ピーク時間帯",
+      offpeak_badge_live: "🌙 オフピーク適用中 (50% OFF)",
+      offpeak_desc_banner: "時間帯別価格: 平日 09:00-12:00, 14:00-18:00 (UTC+8) はピーク。夜間・昼休み・土日祝日は自動的に 50% 割引で計算されます。",
+      badge_offpeak_supported: "時間帯別",
+      badge_offpeak_active: "🌙 オフピーク適用中",
+      badge_peak_active: "⚡ ピーク適用中",
+      peak_tag: "ピーク:",
+      offpeak_tag: "オフピーク:",
+      offpeak_toggle_label: "時間帯別・オフピーク価格を有効化",
+      offpeak_preset_ds: "DeepSeek 公式スケジュール (50% OFF)",
+      offpeak_preset_custom: "カスタムオフピーク単価",
+      offpeak_schedule_desc: "平日 09:00-12:00 / 14:00-18:00 がピーク。18:00-09:00、12:00-14:00 および土日祝日は全日 50% 割引。",
+      offpeak_input_label: "オフピーク入力単価:",
+      offpeak_output_label: "オフピーク出力単価:",
+      offpeak_input_ph: "オフピーク入力単価 (例: 0.07)",
+      offpeak_output_ph: "オフピーク出力単価 (例: 0.14)"
     }
   };
 
