@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,19 +7,23 @@
 <link rel="stylesheet" href="style.css">
 <script src="_magpie/bridge.js"></script>
 <script src="models-data.js"></script>
+<script src="i18n.js"></script>
 <script src="app.js" defer></script>
 </head>
 <body>
 <header>
-  <h1>模型价格 <span style="font-size: 12px; font-weight: normal; color: var(--muted);">(Model Prices)</span></h1>
+  <h1 id="header-title">
+    <span data-i18n="title">模型价格</span>
+    <span id="header-title-sub" style="font-size: 12px; font-weight: normal; color: var(--muted);">(Model Prices)</span>
+  </h1>
   <div class="seg" role="tablist" id="filter-seg">
-    <button type="button" role="tab" data-filter="all" aria-selected="true">全部</button>
-    <button type="button" role="tab" data-filter="custom">自定义</button>
-    <button type="button" role="tab" data-filter="matched">已配公价</button>
-    <button type="button" role="tab" data-filter="unpriced">未定价</button>
+    <button type="button" role="tab" data-filter="all" aria-selected="true" data-i18n="tab_all">全部</button>
+    <button type="button" role="tab" data-filter="custom" data-i18n="tab_custom">自定义</button>
+    <button type="button" role="tab" data-filter="matched" data-i18n="tab_matched">已配公价</button>
+    <button type="button" role="tab" data-filter="unpriced" data-i18n="tab_unpriced">未定价</button>
   </div>
 </header>
-<p class="sub-desc">基于 models.dev 与 Magpie 账单系统，自动匹配与自定义价格即时生效于每日用量及托盘花费。</p>
+<p class="sub-desc" data-i18n="sub_desc">基于 models.dev 与 Magpie 账单系统，自动匹配与自定义价格即时生效于每日用量及托盘花费。</p>
 
 <!-- Master Mode Switch Card (总开关) -->
 <section class="mode-card">
@@ -28,87 +32,85 @@
       <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
       </svg>
-      <span>账单统计口径 (全局计价模式):</span>
+      <span data-i18n="mode_title">账单统计口径 (全局计价模式):</span>
     </div>
     <div class="seg" role="tablist" id="mode-seg">
-      <button type="button" role="tab" id="mode-btn-all" data-mode="all-equivalent" aria-selected="true">🌐 显示所有提供商等值公价</button>
-      <button type="button" role="tab" id="mode-btn-api" data-mode="api-only">💳 只记录真实 API 花费</button>
+      <button type="button" role="tab" id="mode-btn-all" data-mode="all-equivalent" aria-selected="true" data-i18n="mode_btn_all">🌐 显示所有提供商等值公价</button>
+      <button type="button" role="tab" id="mode-btn-api" data-mode="api-only" data-i18n="mode_btn_api">💳 只记录真实 API 花费</button>
     </div>
   </div>
-  <p class="mode-desc" id="mode-desc-text">
-    【当前：等值公价模式】对所有渠道（包含 Trae、WorkBuddy、Antigravity 等包月/免费渠道）均按 models.dev 市场公价计算其消耗的等值市值。
-  </p>
+  <p class="mode-desc" id="mode-desc-text"></p>
 </section>
 
 <section class="tiles">
   <div class="tile">
-    <div class="k">活跃模型</div>
+    <div class="k" data-i18n="tile_active_k">活跃模型</div>
     <div class="v" id="stat-total">0</div>
-    <div class="s">已识别模型</div>
+    <div class="s" data-i18n="tile_active_s">已识别模型</div>
   </div>
   <div class="tile">
-    <div class="k">已生效计费</div>
+    <div class="k" data-i18n="tile_priced_k">已生效计费</div>
     <div class="v" style="color: var(--green);" id="stat-priced">0</div>
-    <div class="s">纳入用量账单</div>
+    <div class="s" data-i18n="tile_priced_s">纳入用量账单</div>
   </div>
   <div class="tile">
-    <div class="k">自定义设价</div>
+    <div class="k" data-i18n="tile_custom_k">自定义设价</div>
     <div class="v" style="color: var(--accent);" id="stat-custom">0</div>
-    <div class="s">自主设定的价格</div>
+    <div class="s" data-i18n="tile_custom_s">自主设定的价格</div>
   </div>
   <div class="tile">
-    <div class="k">未定价模型</div>
+    <div class="k" data-i18n="tile_unpriced_k">未定价模型</div>
     <div class="v" style="color: var(--amber);" id="stat-unpriced">0</div>
-    <div class="s">按 0 花费统计</div>
+    <div class="s" data-i18n="tile_unpriced_s">按 0 花费统计</div>
   </div>
 </section>
 
 <section class="models">
   <div class="models-head">
-    <input type="search" class="search-input" id="search-input" placeholder="搜索模型、渠道或厂商..." autocomplete="off">
-    <button type="button" class="btn" id="btn-sync-all">✨ 全部应用公价</button>
+    <input type="search" class="search-input" id="search-input" placeholder="搜索模型、渠道或厂商..." data-i18n-placeholder="search_placeholder" autocomplete="off">
+    <button type="button" class="btn" id="btn-sync-all" data-i18n="btn_sync_all">✨ 全部应用公价</button>
   </div>
 
   <ul class="model-list" id="models-list"></ul>
-  <p class="sub-desc" id="empty-hint" style="text-align: center; padding: 24px 0;" hidden>未找到符合条件的模型</p>
+  <p class="sub-desc" id="empty-hint" style="text-align: center; padding: 24px 0;" data-i18n="empty_hint" hidden>未找到符合条件的模型</p>
 </section>
 
 <!-- Modal for Custom Price Editing -->
 <div class="modal-backdrop" id="edit-modal" hidden>
   <div class="modal" id="modal-container">
-    <h3 id="modal-model-title">自定义模型价格</h3>
-    <p id="modal-model-sub">设定输入、输出及缓存读写单价（USD / 1M Tokens）</p>
+    <h3 id="modal-model-title" data-i18n="modal_title_default">自定义模型价格</h3>
+    <p id="modal-model-sub" data-i18n="modal_sub_default">设定输入、输出及缓存读写单价（USD / 1M Tokens）</p>
 
     <div class="form-group">
-      <label>计费适用范围 (Scope):</label>
+      <label data-i18n="scope_label">计费适用范围 (Scope):</label>
       <div class="seg" role="tablist" style="width: 100%; display: flex;">
-        <button type="button" role="tab" id="scope-specific" data-scope="specific" style="flex: 1;" aria-selected="true">仅当前渠道 (<span id="scope-model-label"></span>)</button>
-        <button type="button" role="tab" id="scope-wildcard" data-scope="wildcard" style="flex: 1;">任何供应商 (*/<span id="scope-wild-label"></span>)</button>
+        <button type="button" role="tab" id="scope-specific" data-scope="specific" style="flex: 1;" aria-selected="true"><span data-i18n="scope_specific">仅当前渠道</span> (<span id="scope-model-label"></span>)</button>
+        <button type="button" role="tab" id="scope-wildcard" data-scope="wildcard" style="flex: 1;"><span data-i18n="scope_wildcard">任何供应商</span> (*/<span id="scope-wild-label"></span>)</button>
       </div>
-      <p style="font-size: 11px; color: var(--muted); margin-top: 4px;" id="scope-hint">仅针对当前渠道设价；若选「任何供应商」，则所有提供此模型的渠道及历史记录均统一以此价格核算。</p>
+      <p style="font-size: 11px; color: var(--muted); margin-top: 4px;" id="scope-hint"></p>
     </div>
 
     <div class="form-group">
-      <label>输入单价 (Input Cost per 1M):</label>
-      <input type="number" step="0.0001" id="input-cost" placeholder="如 0.14">
+      <label data-i18n="input_cost_label">输入单价 (Input Cost per 1M):</label>
+      <input type="number" step="0.0001" id="input-cost" placeholder="如 0.14" data-i18n-placeholder="input_cost_ph">
     </div>
     <div class="form-group">
-      <label>输出单价 (Output Cost per 1M):</label>
-      <input type="number" step="0.0001" id="output-cost" placeholder="如 0.28">
+      <label data-i18n="output_cost_label">输出单价 (Output Cost per 1M):</label>
+      <input type="number" step="0.0001" id="output-cost" placeholder="如 0.28" data-i18n-placeholder="output_cost_ph">
     </div>
     <div class="form-group">
-      <label>缓存读取单价 (Cache Read per 1M):</label>
-      <input type="number" step="0.0001" id="cache-read-cost" placeholder="如 0.014">
+      <label data-i18n="cache_read_label">缓存读取单价 (Cache Read per 1M):</label>
+      <input type="number" step="0.0001" id="cache-read-cost" placeholder="如 0.014" data-i18n-placeholder="cache_read_ph">
     </div>
     <div class="form-group">
-      <label>缓存写入单价 (Cache Write per 1M):</label>
-      <input type="number" step="0.0001" id="cache-write-cost" placeholder="如 0.14">
+      <label data-i18n="cache_write_label">缓存写入单价 (Cache Write per 1M):</label>
+      <input type="number" step="0.0001" id="cache-write-cost" placeholder="如 0.14" data-i18n-placeholder="cache_write_ph">
     </div>
 
     <div class="modal-foot">
-      <button type="button" class="btn" id="modal-btn-cancel">取消</button>
-      <button type="button" class="btn" id="modal-btn-match" style="margin-right: auto;">填充公价</button>
-      <button type="button" class="btn btn-primary" id="modal-btn-save">保存生效</button>
+      <button type="button" class="btn" id="modal-btn-cancel" data-i18n="btn_cancel">取消</button>
+      <button type="button" class="btn" id="modal-btn-match" style="margin-right: auto;" data-i18n="btn_match">填充公价</button>
+      <button type="button" class="btn btn-primary" id="modal-btn-save" data-i18n="btn_save">保存生效</button>
     </div>
   </div>
 </div>

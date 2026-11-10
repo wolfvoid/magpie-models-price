@@ -1,74 +1,147 @@
-
-// Model Prices Controller with Master Mode Switch & Scope support
+// app.js - Model Prices Controller with Master Mode Switch, Scope support & Full i18n/White-border Fix
 (async () => {
   const $ = (id) => document.getElementById(id);
+  const { t, setLocale, onLocaleChange, getLocale } = window.I18N_MODULE || {
+    t: (k) => k,
+    setLocale: () => {},
+    onLocaleChange: () => {},
+    getLocale: () => "zh"
+  };
 
   let toastTimer = null;
   function showToast(msg) {
-    const t = $("toast");
-    if (!t) return;
-    t.textContent = msg;
-    t.hidden = false;
+    const tEl = $("toast");
+    if (!tEl) return;
+    tEl.textContent = msg;
+    tEl.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
-      t.hidden = true;
+      tEl.hidden = true;
     }, 2500);
   }
 
-  // Initialize theme and options from Magpie bridge if available
-  let lang = "zh";
-  let pluginOptions = {};
-
-  if (globalThis.magpie) {
-    try {
-      const theme = await magpie.ready;
-      if (theme && theme.lang) lang = theme.lang;
-      magpie.onTheme((t) => {
-        document.documentElement.dataset.theme = t.dark ? "dark" : "light";
-      });
-      pluginOptions = (await magpie.options.get()) || {};
-    } catch (e) {
-      console.warn("Magpie bridge ready warning:", e);
-    }
-  }
-
-  // Load models data
+  // Load models data and options
   const rawModels = window.__MAGPIE_MODELS_DATA__ || [];
-  let customPrices = pluginOptions.customPrices || {};
-  let globalMode = pluginOptions.mode || "all-equivalent"; // "all-equivalent" or "api-only"
+  let pluginOptions = {};
+  let customPrices = {};
+  let globalMode = "all-equivalent"; // "all-equivalent" or "api-only"
   let filter = "all";
   let search = "";
   let editingModel = null;
   let selectedScope = "specific";
 
+  // 1. 初始化 Magpie 宿主与插件通信规范 (Host PostMessage Handshake & Theme/Locale Sync)
+  function initMagpieHostSync() {
+    let callId = 1;
+    const pendingCalls = new Map();
+
+    window.addEventListener("message", (ev) => {
+      const msg = ev.data;
+      if (!msg || typeof msg !== "object" || msg.magpie !== 1) return;
+
+      if (msg.id && pendingCalls.has(msg.id)) {
+        const { resolve, reject } = pendingCalls.get(msg.id);
+        pendingCalls.delete(msg.id);
+        if (msg.error) reject(new Error(msg.error));
+        else resolve(msg.result);
+        return;
+      }
+
+      if (msg.event === "theme" && msg.data) {
+        applyHostTheme(msg.data);
+      }
+    });
+
+    function callHost(method, params = {}) {
+      return new Promise((resolve, reject) => {
+        const id = "call-" + callId++;
+        pendingCalls.set(id, { resolve, reject });
+        window.parent.postMessage({ magpie: 1, id, method, params }, "*");
+        setTimeout(() => {
+          if (pendingCalls.has(id)) {
+            pendingCalls.delete(id);
+            reject(new Error("Host call timed out: " + method));
+          }
+        }, 3000);
+      });
+    }
+
+    function applyHostTheme(data) {
+      if (!data) return;
+      const root = document.documentElement;
+      if (data.dark !== undefined) {
+        root.dataset.theme = data.dark ? "dark" : "light";
+      }
+      if (data.tokens) {
+        for (const [k, v] of Object.entries(data.tokens)) {
+          if (v) root.style.setProperty("--" + k, v);
+        }
+      }
+      if (data.lang) {
+        setLocale(data.lang);
+      }
+    }
+
+    callHost("hello")
+      .then((res) => {
+        if (res) applyHostTheme(res);
+      })
+      .catch(() => {});
+  }
+
+  // 2. 初始化 Magpie bridge (如果存在)
+  if (globalThis.magpie) {
+    try {
+      const theme = await magpie.ready;
+      if (theme && theme.lang) {
+        setLocale(theme.lang);
+      }
+      if (theme && theme.dark !== undefined) {
+        document.documentElement.dataset.theme = theme.dark ? "dark" : "light";
+      }
+      magpie.onTheme?.((tTheme) => {
+        if (tTheme.dark !== undefined) {
+          document.documentElement.dataset.theme = tTheme.dark ? "dark" : "light";
+        }
+        if (tTheme.lang) {
+          setLocale(tTheme.lang);
+        }
+      });
+      pluginOptions = (await magpie.options.get()) || {};
+      customPrices = pluginOptions.customPrices || {};
+      globalMode = pluginOptions.mode || "all-equivalent";
+    } catch (e) {
+      console.warn("Magpie bridge ready warning:", e);
+    }
+  }
+
+  initMagpieHostSync();
+
   function getBareModel(fullName) {
-    return fullName.includes('/') ? fullName.split('/')[1] : fullName;
+    return fullName.includes("/") ? fullName.split("/")[1] : fullName;
   }
 
   function getModelPrice(item) {
-    // If in API-only mode and provider is a subscription/free account without custom override:
-    // It is unpriced or 0
-    if (globalMode === 'api-only' && item.providerKind === 'subscription') {
+    if (globalMode === "api-only" && item.providerKind === "subscription") {
       const specificCustom = customPrices[item.model];
       if (specificCustom) {
         return {
-          type: 'custom',
-          scope: 'specific',
+          type: "custom",
+          scope: "specific",
           input: specificCustom.input,
           output: specificCustom.output,
           cache_read: specificCustom.cache_read,
           cache_write: specificCustom.cache_write
         };
       }
-      return null; // Not billed in API-only mode
+      return null;
     }
 
-    // 1. Direct specific custom price
     const specificCustom = customPrices[item.model];
     if (specificCustom) {
       return {
-        type: 'custom',
-        scope: 'specific',
+        type: "custom",
+        scope: "specific",
         input: specificCustom.input,
         output: specificCustom.output,
         cache_read: specificCustom.cache_read,
@@ -76,13 +149,12 @@
       };
     }
 
-    // 2. Wildcard custom price
     const bare = getBareModel(item.model);
-    const wildcardCustom = customPrices['*/' + bare];
+    const wildcardCustom = customPrices["*/" + bare];
     if (wildcardCustom) {
       return {
-        type: 'custom',
-        scope: 'wildcard',
+        type: "custom",
+        scope: "wildcard",
         input: wildcardCustom.input,
         output: wildcardCustom.output,
         cache_read: wildcardCustom.cache_read,
@@ -90,10 +162,9 @@
       };
     }
 
-    // 3. Current active price from settings/list
     if (item.currentPrice && !item.isUnpriced) {
       return {
-        type: 'current',
+        type: "current",
         text: item.currentPrice
       };
     }
@@ -101,14 +172,14 @@
   }
 
   function renderModeUI() {
-    if (globalMode === 'api-only') {
+    if (globalMode === "api-only") {
       $("mode-btn-api").setAttribute("aria-selected", "true");
       $("mode-btn-all").removeAttribute("aria-selected");
-      $("mode-desc-text").innerHTML = '【当前：<strong>只记录 API 真实花费模式</strong>】仅对真实通过付费 API Key 按量计费的渠道记账；包月会员、免费账号及额度渠道（如 Trae, WorkBuddy, Antigravity 等）计价为 $0.00，不会在托盘与用量统计中产生虚拟金额。';
+      $("mode-desc-text").innerHTML = t("mode_desc_api");
     } else {
       $("mode-btn-all").setAttribute("aria-selected", "true");
       $("mode-btn-api").removeAttribute("aria-selected");
-      $("mode-desc-text").innerHTML = '【当前：<strong>所有提供商等值公价模式</strong>】对所有渠道（包含 Trae、WorkBuddy、Antigravity 等包月/免费渠道）均按 models.dev 市场公价换算其消耗的等值市值。';
+      $("mode-desc-text").innerHTML = t("mode_desc_all");
     }
   }
 
@@ -122,7 +193,7 @@
       const p = getModelPrice(m);
       if (p) {
         pricedCount++;
-        if (p.type === 'custom') customCount++;
+        if (p.type === "custom") customCount++;
       } else {
         unpricedCount++;
       }
@@ -138,22 +209,23 @@
     let list = rawModels;
 
     if (filter === "custom") {
-      list = list.filter(m => {
+      list = list.filter((m) => {
         const p = getModelPrice(m);
-        return p && p.type === 'custom';
+        return p && p.type === "custom";
       });
     } else if (filter === "unpriced") {
-      list = list.filter(m => !getModelPrice(m));
+      list = list.filter((m) => !getModelPrice(m));
     } else if (filter === "matched") {
-      list = list.filter(m => !!m.matched);
+      list = list.filter((m) => !!m.matched);
     }
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter(m => 
-        m.model.toLowerCase().includes(q) || 
-        (m.name && m.name.toLowerCase().includes(q)) ||
-        (m.matched && (m.matched.provider + "/" + m.matched.model).toLowerCase().includes(q))
+      list = list.filter(
+        (m) =>
+          m.model.toLowerCase().includes(q) ||
+          (m.name && m.name.toLowerCase().includes(q)) ||
+          (m.matched && (m.matched.provider + "/" + m.matched.model).toLowerCase().includes(q))
       );
     }
 
@@ -170,19 +242,24 @@
       const li = document.createElement("li");
       li.className = "model-item";
 
-      // Item top: model name + actions
       const topDiv = document.createElement("div");
       topDiv.className = "item-top";
 
-      const isSub = item.providerKind === 'subscription';
-      const kindBadge = isSub 
-        ? '<span style="font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; margin-left: 5px;">包月/账号</span>'
-        : '<span style="font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 4px; margin-left: 5px;">付费API</span>';
+      const isSub = item.providerKind === "subscription";
+      const kindBadge = isSub
+        ? `<span style="font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; margin-left: 5px;">${escapeHtml(t("badge_subscription"))}</span>`
+        : `<span style="font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 4px; margin-left: 5px;">${escapeHtml(t("badge_paid_api"))}</span>`;
 
       const infoDiv = document.createElement("div");
       infoDiv.className = "item-info";
-      infoDiv.innerHTML = '<div class="m-name">' + escapeHtml(item.model) + kindBadge + '</div>' +
-        '<div class="m-sub">' + escapeHtml(item.name || '') + '</div>';
+      infoDiv.innerHTML =
+        '<div class="m-name">' +
+        escapeHtml(item.model) +
+        kindBadge +
+        "</div>" +
+        '<div class="m-sub">' +
+        escapeHtml(item.name || "") +
+        "</div>";
 
       const actionsDiv = document.createElement("div");
       actionsDiv.className = "item-actions";
@@ -190,49 +267,57 @@
       const btnEdit = document.createElement("button");
       btnEdit.type = "button";
       btnEdit.className = "btn btn-small";
-      btnEdit.textContent = "修改定价";
+      btnEdit.textContent = t("btn_edit_price");
       btnEdit.addEventListener("click", () => openEditModal(item));
       actionsDiv.append(btnEdit);
 
       const current = getModelPrice(item);
       const bare = getBareModel(item.model);
-      const hasCustom = !!(customPrices[item.model] || customPrices['*/' + bare]);
+      const hasCustom = !!(customPrices[item.model] || customPrices["*/" + bare]);
 
       if (hasCustom) {
         const btnReset = document.createElement("button");
         btnReset.type = "button";
         btnReset.className = "btn btn-small";
         btnReset.style.color = "var(--red)";
-        btnReset.textContent = "重置";
+        btnReset.textContent = t("btn_reset");
         btnReset.addEventListener("click", () => resetModelPrice(item.model));
         actionsDiv.append(btnReset);
       }
 
       topDiv.append(infoDiv, actionsDiv);
 
-      // Item bottom: current price tag + models.dev reference
       const bottomDiv = document.createElement("div");
       bottomDiv.className = "item-bottom";
 
       const priceCol = document.createElement("div");
       priceCol.className = "price-col";
 
-      if (current && current.type === 'custom') {
-        const scopeBadge = current.scope === 'wildcard' 
-          ? '<span class="badge-tag badge-custom" title="通配生效于所有提供此模型的渠道及历史记录">任何渠道 (*)</span>' 
-          : '<span class="badge-tag badge-custom" title="仅此特定渠道生效">专有渠道</span>';
+      if (current && current.type === "custom") {
+        const scopeBadge =
+          current.scope === "wildcard"
+            ? `<span class="badge-tag badge-custom" title="${escapeHtml(t("scope_wildcard_badge_title"))}">${escapeHtml(t("scope_wildcard_badge"))}</span>`
+            : `<span class="badge-tag badge-custom" title="${escapeHtml(t("scope_specific_badge_title"))}">${escapeHtml(t("scope_specific_badge"))}</span>`;
 
-        priceCol.innerHTML = '<span class="rate">$' + current.input + ' / $' + current.output + '</span>' +
+        priceCol.innerHTML =
+          '<span class="rate">$' +
+          current.input +
+          " / $" +
+          current.output +
+          "</span>" +
           scopeBadge +
-          '<span class="cache">缓存: $' + current.cache_read + '/$' + current.cache_write + '</span>';
-      } else if (current && current.type === 'current') {
-        priceCol.innerHTML = '<span class="rate" style="color: var(--green);">' + escapeHtml(current.text) + '</span>' +
-          '<span class="badge-tag badge-modelsdev">已生效</span>';
+          `<span class="cache">${escapeHtml(t("cache_label"))} $${current.cache_read}/$${current.cache_write}</span>`;
+      } else if (current && current.type === "current") {
+        priceCol.innerHTML =
+          '<span class="rate" style="color: var(--green);">' +
+          escapeHtml(current.text) +
+          "</span>" +
+          `<span class="badge-tag badge-modelsdev">${escapeHtml(t("badge_active"))}</span>`;
       } else {
-        if (globalMode === 'api-only' && isSub) {
-          priceCol.innerHTML = '<span class="badge-tag" style="background: var(--card); color: var(--muted);">免记账 (包月/账号)</span>';
+        if (globalMode === "api-only" && isSub) {
+          priceCol.innerHTML = `<span class="badge-tag" style="background: var(--card); color: var(--muted);">${escapeHtml(t("badge_free_tier"))}</span>`;
         } else {
-          priceCol.innerHTML = '<span class="badge-tag badge-unpriced">未定价 (Unpriced)</span>';
+          priceCol.innerHTML = `<span class="badge-tag badge-unpriced">${escapeHtml(t("badge_unpriced"))}</span>`;
         }
       }
 
@@ -240,13 +325,18 @@
       refCol.className = "ref-col";
       if (item.matched) {
         const c = item.matched.cost;
-        refCol.innerHTML = '<span>公价参考:</span> <span class="ref-price">$' + c.input + ' / $' + c.output + '</span>';
+        refCol.innerHTML =
+          `<span>${escapeHtml(t("market_ref_prefix"))}</span> ` +
+          '<span class="ref-price">$' +
+          c.input +
+          " / $" +
+          c.output +
+          "</span>";
       } else {
-        refCol.innerHTML = '<span>无公价参考</span>';
+        refCol.innerHTML = `<span>${escapeHtml(t("no_market_ref"))}</span>`;
       }
 
       bottomDiv.append(priceCol, refCol);
-
       li.append(topDiv, bottomDiv);
       listContainer.append(li);
     }
@@ -254,7 +344,12 @@
 
   function escapeHtml(str) {
     if (!str) return "";
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 
   // Edit Modal logic
@@ -262,19 +357,21 @@
     editingModel = item;
     const bare = getBareModel(item.model);
 
-    $("modal-model-title").textContent = "设置 " + item.model + " 价格";
-    $("modal-model-sub").textContent = item.name ? "官方名称: " + item.name : "配置每次请求与缓存单价";
+    $("modal-model-title").textContent = t("modal_title_set", { model: item.model });
+    $("modal-model-sub").textContent = item.name
+      ? t("modal_sub_official", { name: item.name })
+      : t("modal_sub_default");
     $("scope-model-label").textContent = item.model;
     $("scope-wild-label").textContent = bare;
 
-    if (customPrices['*/' + bare] && !customPrices[item.model]) {
-      setScope('wildcard');
+    if (customPrices["*/" + bare] && !customPrices[item.model]) {
+      setScope("wildcard");
     } else {
-      setScope('specific');
+      setScope("specific");
     }
 
     const current = getModelPrice(item);
-    if (current && current.type === 'custom') {
+    if (current && current.type === "custom") {
       $("input-cost").value = current.input;
       $("output-cost").value = current.output;
       $("cache-read-cost").value = current.cache_read;
@@ -297,14 +394,18 @@
 
   function setScope(scope) {
     selectedScope = scope;
-    if (scope === 'wildcard') {
+    if (scope === "wildcard") {
       $("scope-wildcard").setAttribute("aria-selected", "true");
       $("scope-specific").removeAttribute("aria-selected");
-      $("scope-hint").textContent = "【任何供应商模式】：价格将写入 */" + getBareModel(editingModel?.model || '') + "，所有提供此模型的渠道统一以此价格核算！";
+      $("scope-hint").textContent = t("scope_hint_wildcard", {
+        model: getBareModel(editingModel?.model || "")
+      });
     } else {
       $("scope-specific").setAttribute("aria-selected", "true");
       $("scope-wildcard").removeAttribute("aria-selected");
-      $("scope-hint").textContent = "【仅当前渠道模式】：价格仅对当前所选的 " + (editingModel?.model || '') + " 生效，其他渠道该模型不受影响。";
+      $("scope-hint").textContent = t("scope_hint_specific", {
+        model: editingModel?.model || ""
+      });
     }
   }
 
@@ -316,7 +417,7 @@
   async function saveModelPrice() {
     if (!editingModel) return;
     const bare = getBareModel(editingModel.model);
-    const targetKey = selectedScope === 'wildcard' ? ('*/' + bare) : editingModel.model;
+    const targetKey = selectedScope === "wildcard" ? "*/" + bare : editingModel.model;
 
     const priceObj = {
       input: parseFloat($("input-cost").value) || 0,
@@ -327,7 +428,7 @@
 
     customPrices[targetKey] = priceObj;
 
-    if (selectedScope === 'wildcard' && customPrices[editingModel.model]) {
+    if (selectedScope === "wildcard" && customPrices[editingModel.model]) {
       delete customPrices[editingModel.model];
     }
 
@@ -335,18 +436,18 @@
     closeEditModal();
     renderStats();
     renderList();
-    showToast("已设置 " + targetKey + " 单价并生效");
+    showToast(t("toast_rate_saved", { key: targetKey }));
   }
 
   async function resetModelPrice(model) {
     const bare = getBareModel(model);
     delete customPrices[model];
-    delete customPrices['*/' + bare];
+    delete customPrices["*/" + bare];
 
     await persistOptions();
     renderStats();
     renderList();
-    showToast("已重置 " + model + " 定价");
+    showToast(t("toast_rate_reset", { model }));
   }
 
   async function setGlobalMode(mode) {
@@ -355,7 +456,7 @@
     await persistOptions();
     renderStats();
     renderList();
-    showToast(mode === 'api-only' ? "已切换为：仅计费真实付费 API" : "已切换为：显示所有渠道等值公价");
+    showToast(mode === "api-only" ? t("toast_mode_api") : t("toast_mode_all"));
   }
 
   async function persistOptions() {
@@ -388,14 +489,16 @@
     await persistOptions();
     renderStats();
     renderList();
-    showToast("已应用 " + count + " 个匹配模型公价");
+    showToast(t("toast_sync_all", { count }));
   }
 
   // Event handlers
   $("filter-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("button");
     if (!btn) return;
-    $("filter-seg").querySelectorAll("button").forEach(b => b.removeAttribute("aria-selected"));
+    $("filter-seg")
+      .querySelectorAll("button")
+      .forEach((b) => b.removeAttribute("aria-selected"));
     btn.setAttribute("aria-selected", "true");
     filter = btn.dataset.filter;
     renderList();
@@ -441,6 +544,21 @@
     }
   });
 
+  // 当语言切换时，触发全量 UI 重新渲染
+  onLocaleChange(() => {
+    renderModeUI();
+    renderStats();
+    renderList();
+    if (editingModel && !$("edit-modal").hidden) {
+      $("modal-model-title").textContent = t("modal_title_set", { model: editingModel.model });
+      $("modal-model-sub").textContent = editingModel.name
+        ? t("modal_sub_official", { name: editingModel.name })
+        : t("modal_sub_default");
+      setScope(selectedScope);
+    }
+  });
+
+  // 初始渲染
   renderModeUI();
   renderStats();
   renderList();
