@@ -220,8 +220,8 @@ console.log('10. 测试宿主实时模型快照写入...');
   delete process.env.MAGPIE_MODELS_PRICE_PAGE;
   console.log('   ✓ 宿主实时快照写入、幂等跳过与清理正确');
 
-  // 10. settings.json must not be rewritten by plugin loads that change nothing
-  console.log('10. 测试 settings.json 幂等写入与缺省模式保护...');
+  // 11. settings.json must not be rewritten by plugin loads that change nothing
+  console.log('11. 测试 settings.json 幂等写入与缺省模式保护...');
   const { execFileSync } = require('child_process');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'magpie-models-price-home-'));
   const settingsDir = path.join(home, '.config/magpie');

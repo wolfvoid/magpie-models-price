@@ -68,7 +68,7 @@
 ### 刷新数据
 
 - **↻ 刷新配置**：重新读取 Magpie 的渠道列表、插件选项与账单口径，并尝试加载宿主刚写入的 `page/models-live.js` 实时模型快照，不需要重启 Magpie，也不需要手工跑 CLI。
-- **自动更新模型快照**：插件通过 `magpie.hooks`（`price.hooks.mjs`）在 Magpie 宿主进程中定期扫描 `~/.cache/magpie`，把最新渠道/模型写入页面旁的 `models-live.js`。页面沙箱无法联网或访问本机缓存，因此采用与 Agent Office 相同的「宿主写文件 → 页面重新加载文件」模式。
+- **自动更新模型快照**：插件通过 `magpie.hooks`（`price.hooks.mjs`）在 Magpie 宿主进程中每 10 秒检查一次 `~/.cache/magpie` 的输入文件，只有输入变化、且快照内容（不含日期行）确实不同时才重新扫描并写入页面旁的 `models-live.js`。页面沙箱无法联网或访问本机缓存，因此采用与 Agent Office 相同的「宿主写文件 → 页面重新加载文件」模式。写入规则见下文「开发注意事项」。
 - **随包快照兜底**：发布包仍包含 `page/models-data.js`。若宿主 hooks 尚未就绪，页面会继续使用随包快照，并在提示中说明。开发者仍可用 `node page/generate-data.js` 更新随包快照。刷新快照不会自动覆盖用户在 Magpie 中设置的渠道自定义价。
 
 ### 截图
@@ -103,6 +103,59 @@ node index.js sync
 # 预览拟同步的设价命令（不实际写入）
 node index.js sync --dry-run
 ```
+
+## 开发注意事项（接手的开发者 / Agent 必读）
+
+> ⚠️ 这个插件曾经造成过一次严重事故：插件宿主每 6–9 秒重启一次，连续约两周（每小时约 1000 次），宿主 CPU 一直在 80–100%，`settings.json` 每分钟被重写约 12 次，计费口径在两种模式之间来回切换，同一宿主里其他插件（Cursor / Kiro 登录等）的请求被拖慢 47–58 秒。复盘见 [26bc0dd 下的评论](https://github.com/zrtzrt/magpie-models-price/commit/26bc0dd4b3dc1cddbc1c07e1f2a577400d95b076#commitcomment-211544694)，上游修复见 [PR #5](https://github.com/zrtzrt/magpie-models-price/pull/5)。修改 `index.js`、`matcher.js`、`price.hooks.mjs` 前请先读完本节。
+
+### 事故成因
+
+1. **快照循环（起因）**：`price.hooks.mjs` 把快照写进插件自己目录里的 `page/models-live.js`。用 `file://` 安装的本地插件，Magpie 会监视它的目录，目录里有文件变化就重启插件宿主。新宿主的内存缓存是空的，于是再写一次快照，又触发重启。
+2. **模式来回切换（放大器）**：`config()` 把 `input.magpie.options()` 返回的 Promise 当成对象使用，读不到 `mode`，于是回落到默认的 `all-equivalent`；而加载路径用的是用户保存的 `api-only`。每次宿主启动都会往 `settings.json` 写两份不同的 `modelPrices`。
+3. **重活压在加载路径上**：`scanAll()` 要解析整份 models.dev 目录，约 3 秒 CPU。原代码在模块加载时、每个请求时、每次重启时都同步执行它。
+
+### 已实测的 Magpie 行为（0.1.4726 / 0.1.4739）
+
+| 操作 | 会不会重启插件宿主 |
+|---|---|
+| 新建或改写插件目录里的普通文件（包括 `page/` 下的文件） | **会**，每次变化重启 1 次 |
+| 写入插件目录里以点开头的目录、`node_modules`、`.git` | 不会 |
+| 写 `~/.config/magpie/plugins.json`，例如保存插件选项，内容不变也算 | **会** |
+| 写 `~/.config/magpie/settings.json`，包括改 `modelPrices` | 不会 |
+| touch 通过 npm 安装的插件目录 | 不会，只有本地 `file://` 插件被监视 |
+
+以上来自对照实验，不是读 Magpie 源码得出的。Magpie 升级后行为可能变化，改动相关逻辑前建议按下文方法重新验证一遍。
+
+### 必须遵守的规则
+
+- **不要在运行时写插件自己的目录**，除非写入是幂等的。每写一次，本地安装的用户就会多一次宿主重启。新增的运行时数据优先写到 `~/.cache/magpie-models-price/` 或插件目录下以点开头的子目录。
+- **所有写入都要先比较、后写入**：`settings.json` 一律通过 `matcher.writeModelPricesIfChanged()` 写，`models-live.js` 一律通过 `writeSnapshot()` 写。新进程启动时要和磁盘上的内容比较，不能只和空的内存缓存比较。比较时要排除日期、时间戳这类每天都会变的字段。
+- **缺少 `mode` 时不能套用默认值**：选项可能还没加载好，也可能是 Promise。一律先 `await`，`mode` 不是 `api-only` / `all-equivalent` 就直接跳过，否则会覆盖用户选择的计费口径。
+- **不要在模块加载时或 `onRequest` 里同步执行 `scanAll()`**：放到 `setTimeout(…, 0)` 或定时器里执行，防止重叠；只在输入文件（`models.json`、`providers-state.json`、`settings.json` 里的 `modelPrices`）变化时才重新扫描。
+- **页面不要频繁调用 `magpie.options.set`**：它会写 `plugins.json`，每次都会让宿主重启一次。保持现有的去抖（450ms），不要在定时器或渲染循环里调用。
+- **不要用会触发写入的定时器做「保活」**：任何周期性逻辑都必须在「什么都没变」时做到零写盘。
+
+### 预期中的正常行为
+
+- 切换计费模式或修改价格时，会写 `plugins.json`，宿主重启 1–2 次，然后停下。
+- Magpie 更新模型目录（`models.json`）后，插件会扫描一次；只有快照内容真的变了才写盘，宿主最多重启 1 次。
+- 插件负责管理 `modelPrices`：在 Magpie 设置页手动改的价格，下次同步时会按插件配置改回去。要改价格，请在插件页面里改，或修改插件选项里的 `customPrices`。
+
+### 修改后如何验证
+
+1. 运行 `node check.js`。第 10、11 项是这次事故的回归测试，覆盖：重启后不重写快照、只有日期变化不写盘、配置不变不写 `settings.json`、缺少 `mode` 不覆盖价格、无关设置变化不触发重扫。
+2. 部署到本地插件目录并开启插件，然后挂机至少 3 分钟，统计这段时间的重启和写盘：
+
+   ```bash
+   L=~/Library/Logs/magpie/app.log
+   H0=$(grep -cF 'plugin: host starts' $L); S0=$(grep -cF 'Synchronized mode' $L)
+   sleep 180
+   echo "host restarts +$(( $(grep -cF 'plugin: host starts' $L) - H0 ))  sync +$(( $(grep -cF 'Synchronized mode' $L) - S0 ))"
+   stat -f '%Sm %N' ~/.config/magpie/settings.json ~/.config/magpie/plugins/local/magpie-models-price/page/models-live.js
+   ```
+
+   空闲时重启次数和同步日志都应为 0，两个文件的修改时间都不应变化，`plugin-host` 进程的 CPU 应接近 0%。
+3. 如果怀疑又出现了循环：先执行 `magpie plugin off file://$HOME/.config/magpie/plugins/local/magpie-models-price` 立即止损，再到 `app.log` 里查 `plugin: host starts` 和 `Synchronized mode` 出现的频率。
 
 ## 许可证
 MIT License © zrtzrt
