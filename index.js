@@ -5,13 +5,29 @@ const matcher = require('./matcher');
 
 const SETTINGS_PATH = path.join(process.env.HOME || '', '.config/magpie/settings.json');
 
-function syncModeAndPrices(options) {
-  if (!options || typeof options !== 'object') return;
+const MODES = new Set(['api-only', 'all-equivalent']);
+let lastSynced = '';
+let initApplied = false;
+
+// Only sync options the user actually saved: a missing or unknown mode must
+// not fall back to a default, or two load paths end up fighting over
+// settings.json and Magpie keeps reloading the plugin.
+async function syncModeAndPrices(options, { once = false } = {}) {
   try {
-    const mode = options.mode || 'all-equivalent';
-    const customPrices = options.customPrices || {};
-    matcher.applyGlobalMode(mode, customPrices);
-    console.log(`Synchronized mode [${mode}] and custom prices to Magpie settings.json`);
+    const opts = await options;
+    if (!opts || typeof opts !== 'object' || !MODES.has(opts.mode)) return;
+    if (once) {
+      if (initApplied) return;
+      initApplied = true;
+    }
+    const customPrices = opts.customPrices || {};
+    const signature = matcher.stableStringify({ mode: opts.mode, customPrices });
+    if (signature === lastSynced) return;
+    const { changed } = matcher.applyGlobalModeIfChanged(opts.mode, customPrices);
+    lastSynced = signature;
+    if (changed) {
+      console.log(`Synchronized mode [${opts.mode}] and custom prices to Magpie settings.json`);
+    }
   } catch (err) {
     console.error('Failed to sync mode and prices:', err.message);
   }
@@ -19,16 +35,12 @@ function syncModeAndPrices(options) {
 
 // OpenCode / Magpie Plugin export
 async function MagpieModelPricesPlugin(input, options) {
-  if (options) {
-    syncModeAndPrices(options);
-  }
+  await syncModeAndPrices(options, { once: true });
 
   return {
     async config(cfg) {
-      const opts = input?.magpie?.options?.() || options;
-      if (opts) {
-        syncModeAndPrices(opts);
-      }
+      const live = await input?.magpie?.options?.();
+      await syncModeAndPrices(live && typeof live === 'object' ? live : options);
     }
   };
 }

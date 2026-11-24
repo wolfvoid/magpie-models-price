@@ -201,9 +201,70 @@ console.log('10. 测试宿主实时模型快照写入...');
   const second = hooks.writeSnapshot();
   assert(second.ok && second.unchanged === true, '内容未变时应跳过重复写入');
   hooks.stop();
+  const restarted = await import(pathToFileURL(path.join(__dirname, 'price.hooks.mjs')).href + '?restart');
+  const mtimeBefore = fs.statSync(live).mtimeMs;
+  const third = restarted.writeSnapshot();
+  restarted.stop();
+  assert(third.ok && third.unchanged === true, '宿主重启后内容未变也应跳过写入');
+  assert.strictEqual(fs.statSync(live).mtimeMs, mtimeBefore, '宿主重启后不应改写 models-live.js');
+  const dayOnly = fs.readFileSync(live, 'utf8').replace(/^(window\.__MAGPIE_MODELS_DATA_AT__ = ).*$/m, '$1"2000-01-01";');
+  fs.writeFileSync(live, dayOnly);
+  const restarted2 = await import(pathToFileURL(path.join(__dirname, 'price.hooks.mjs')).href + '?restart2');
+  const dayBefore = fs.statSync(live).mtimeMs;
+  const fourth = restarted2.writeSnapshot();
+  restarted2.stop();
+  assert(fourth.ok && fourth.unchanged === true, '只有日期变化时不应重写快照');
+  assert.strictEqual(fs.statSync(live).mtimeMs, dayBefore, '日期变化不应改写 models-live.js');
+  assert(fs.readFileSync(live, 'utf8').includes('2000-01-01'), '日期未变的文件应保持原样');
   fs.rmSync(tmp, { recursive: true, force: true });
   delete process.env.MAGPIE_MODELS_PRICE_PAGE;
   console.log('   ✓ 宿主实时快照写入、幂等跳过与清理正确');
+
+  // 10. settings.json must not be rewritten by plugin loads that change nothing
+  console.log('10. 测试 settings.json 幂等写入与缺省模式保护...');
+  const { execFileSync } = require('child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'magpie-models-price-home-'));
+  const settingsDir = path.join(home, '.config/magpie');
+  fs.mkdirSync(settingsDir, { recursive: true });
+  const settingsFile = path.join(settingsDir, 'settings.json');
+  fs.writeFileSync(settingsFile, JSON.stringify({ theme: 'dark' }, null, 2));
+  const script = `
+    const fs = require('fs');
+    const plugin = require(${JSON.stringify(path.join(__dirname, 'index.js'))});
+    const file = ${JSON.stringify(settingsFile)};
+    const custom = { '*/model-a': { input: 1, output: 2, cache_read: 0, cache_write: 0 } };
+    const stamp = () => fs.readFileSync(file, 'utf8');
+    (async () => {
+      const hooks = await plugin({ magpie: { options: async () => ({ mode: 'api-only', customPrices: custom }) } }, Promise.resolve({ mode: 'api-only', customPrices: custom }));
+      const afterInit = stamp();
+      await hooks.config({});
+      const afterConfig = stamp();
+      await plugin({}, { customPrices: {} });
+      const afterNoMode = stamp();
+      process.stdout.write(JSON.stringify({ wrote: afterInit.includes('*/model-a'), sameAfterConfig: afterInit === afterConfig, sameAfterNoMode: afterInit === afterNoMode }));
+    })().catch((e) => { console.error(e); process.exit(1); });
+  `;
+  const out = JSON.parse(execFileSync(process.execPath, ['-e', script], { env: { ...process.env, HOME: home } }).toString().trim().split('\n').pop());
+  assert(out.wrote, '显式 mode 时应写入 modelPrices');
+  assert(out.sameAfterConfig, 'config() 拿到 Promise 形式的相同选项时不应改写 settings.json');
+  assert(out.sameAfterNoMode, '缺少 mode 时不应回落到默认模式改写 settings.json');
+  const mtime = fs.statSync(settingsFile).mtimeMs;
+  execFileSync(process.execPath, ['-e', `require(${JSON.stringify(path.join(__dirname, 'matcher.js'))}).applyGlobalModeIfChanged('api-only', ${JSON.stringify({ '*/model-a': { input: 1, output: 2, cache_read: 0, cache_write: 0 } })})`], { env: { ...process.env, HOME: home } });
+  assert.strictEqual(fs.statSync(settingsFile).mtimeMs, mtime, '新进程重复应用同一配置时不应写盘');
+
+  const probe = (key) => execFileSync(process.execPath, ['-e', `
+    const fs = require('fs');
+    const file = ${JSON.stringify(settingsFile)};
+    const s = JSON.parse(fs.readFileSync(file, 'utf8'));
+    ${key}
+    fs.writeFileSync(file, JSON.stringify(s, null, 2));
+    process.stdout.write(require(${JSON.stringify(path.join(__dirname, 'matcher.js'))}).settingsFingerprint());
+  `], { env: { ...process.env, HOME: home } }).toString().trim();
+  const base = probe('void 0');
+  assert.strictEqual(probe("s.theme = 'light'"), base, '无关设置变化不应改变定价指纹');
+  assert.notStrictEqual(probe("s.modelPrices['*/model-a'].input = 9"), base, '价格变化应改变定价指纹');
+  fs.rmSync(home, { recursive: true, force: true });
+  console.log('   ✓ 相同配置不写盘、Promise 选项与缺省模式均安全');
   console.log('\n🎉 所有测试用例 100% 通过！兼容本地与 CI 环境。');
 })().catch((err) => {
   console.error(err);

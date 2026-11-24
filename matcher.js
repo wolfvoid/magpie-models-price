@@ -208,6 +208,10 @@ function matchModel(target, catalog) {
       const bOff = isOfficialMaker(b.provider) ? 1 : 0;
       if (aOff !== bOff) return bOff - aOff;
 
+      // 'google' beats 'google-vertex' for the same model, whatever order the
+      // catalog happens to list them in.
+      if (a.provider.length !== b.provider.length) return a.provider.length - b.provider.length;
+
       const aNonZero = (a.cost.input > 0 || a.cost.output > 0) ? 1 : 0;
       const bNonZero = (b.cost.input > 0 || b.cost.output > 0) ? 1 : 0;
       return bNonZero - aNonZero;
@@ -282,6 +286,45 @@ function scanAll() {
   return report;
 }
 
+function stableStringify(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort()
+      .filter((k) => value[k] !== undefined)
+      .map((k) => JSON.stringify(k) + ':' + stableStringify(value[k]))
+      .join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
+function readSettings() {
+  return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+}
+
+// Cheap change detector for the only part of settings.json the pricing uses.
+function settingsFingerprint() {
+  try {
+    const s = readSettings();
+    return stableStringify(s.modelPrices || {});
+  } catch {
+    return 'unreadable';
+  }
+}
+
+// Magpie reloads plugins whenever settings.json changes, so only touch the
+// file when modelPrices really differ, and replace it atomically.
+function writeModelPricesIfChanged(s, newPrices) {
+  const before = s.modelPrices && Object.keys(s.modelPrices).length ? s.modelPrices : undefined;
+  const after = newPrices && Object.keys(newPrices).length ? newPrices : undefined;
+  if (stableStringify(before) === stableStringify(after)) return false;
+  if (after) s.modelPrices = after;
+  else delete s.modelPrices;
+  const tmp = SETTINGS_PATH + '.models-price.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(s, null, 2), 'utf8');
+  fs.renameSync(tmp, SETTINGS_PATH);
+  return true;
+}
+
 function applyPrice(model, priceString) {
   const parts = priceString.split(',').map(p => parseFloat(p.trim()) || 0);
   const priceObj = {
@@ -291,22 +334,18 @@ function applyPrice(model, priceString) {
     cache_write: parts[3] ?? 0
   };
 
-  const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
-  s.modelPrices = s.modelPrices || {};
-  s.modelPrices[model] = priceObj;
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2), 'utf8');
+  const s = readSettings();
+  const changed = writeModelPricesIfChanged(s, { ...(s.modelPrices || {}), [model]: priceObj });
 
-  return `Applied ${model} -> $${priceObj.input}/$${priceObj.output}`;
+  return `${changed ? 'Applied' : 'Unchanged'} ${model} -> $${priceObj.input}/$${priceObj.output}`;
 }
 
 function resetPrice(model) {
-  const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+  const s = readSettings();
   if (s.modelPrices && s.modelPrices[model]) {
-    delete s.modelPrices[model];
-    if (Object.keys(s.modelPrices).length === 0) {
-      delete s.modelPrices;
-    }
-    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2), 'utf8');
+    const rest = { ...s.modelPrices };
+    delete rest[model];
+    writeModelPricesIfChanged(s, rest);
     return `Reset price for ${model}`;
   }
   return `No custom price found for ${model}`;
@@ -316,10 +355,11 @@ function resetPrice(model) {
  * Apply Global Pricing Mode:
  * - 'api-only': only write real prices for 'api' providers; subscription providers have prices set to 0 or removed
  * - 'all-equivalent': write market prices for all models
+ * Returns { count, changed }; settings.json is left untouched when nothing changed.
  */
-function applyGlobalMode(mode, customOverrides = {}) {
+function applyGlobalModeIfChanged(mode, customOverrides = {}) {
   const report = scanAll();
-  const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+  const s = readSettings();
   const newPrices = {};
 
   if (mode === 'api-only') {
@@ -364,9 +404,12 @@ function applyGlobalMode(mode, customOverrides = {}) {
     }
   }
 
-  s.modelPrices = newPrices;
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2), 'utf8');
-  return Object.keys(newPrices).length;
+  const changed = writeModelPricesIfChanged(s, newPrices);
+  return { count: Object.keys(newPrices).length, changed };
+}
+
+function applyGlobalMode(mode, customOverrides = {}) {
+  return applyGlobalModeIfChanged(mode, customOverrides).count;
 }
 
 /**
@@ -455,6 +498,9 @@ function hasOffPeakPreset(modelName = '', provider = '') {
 }
 
 module.exports = {
+  SETTINGS_PATH,
+  SOURCE_PATHS: [CACHE_MODELS_PATH, PROVIDERS_STATE_PATH, SETTINGS_PATH],
+  settingsFingerprint,
   loadCatalog,
   getMagpieModels,
   getPricingStatus,
@@ -466,5 +512,7 @@ module.exports = {
   applyGlobalMode,
   getBeijingTime,
   checkOffPeakStatus,
-  hasOffPeakPreset
+  hasOffPeakPreset,
+  applyGlobalModeIfChanged,
+  stableStringify
 };
