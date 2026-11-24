@@ -98,4 +98,53 @@ const geminiGroup = groups.find(g => g.bare === 'gemini-3.8-flash');
 assert(geminiGroup && geminiGroup.items.length === 3, 'gemini-3.8-flash 应包含 3 个供应商渠道');
 console.log('   ✓ 模型按标识分组聚合校验通过 (151 款唯一模型聚合 187 渠道)');
 
+// settings.json must only be written when modelPrices really change
+console.log('测试 settings.json 幂等写入与缺省模式保护...');
+{
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'magpie-models-price-home-'));
+  const settingsDir = path.join(home, '.config/magpie');
+  fs.mkdirSync(settingsDir, { recursive: true });
+  const settingsFile = path.join(settingsDir, 'settings.json');
+  fs.writeFileSync(settingsFile, JSON.stringify({ theme: 'dark' }, null, 2));
+  const custom = { '*/model-a': { input: 1, output: 2, cache_read: 0, cache_write: 0 } };
+  const script = `
+    const fs = require('fs');
+    const plugin = require(${JSON.stringify(path.join(__dirname, 'index.js'))});
+    const file = ${JSON.stringify(settingsFile)};
+    const custom = ${JSON.stringify(custom)};
+    const read = () => fs.readFileSync(file, 'utf8');
+    const mtime = () => fs.statSync(file).mtimeMs;
+    (async () => {
+      const hooks = await plugin({ magpie: { options: async () => ({ mode: 'api-only', customPrices: custom }) } }, {});
+      await new Promise((r) => setTimeout(r, 50));
+      await hooks.config({});
+      const afterFirst = read();
+      const m1 = mtime();
+      await new Promise((r) => setTimeout(r, 20));
+      await hooks.config({});
+      const m2 = mtime();
+      const noMode = await plugin({}, { customPrices: {} });
+      await new Promise((r) => setTimeout(r, 50));
+      await noMode.config({});
+      process.stdout.write(JSON.stringify({
+        wrote: afterFirst.includes('*/model-a'),
+        sameMtime: m1 === m2,
+        untouchedByNoMode: read() === afterFirst
+      }));
+      process.exit(0);
+    })().catch((e) => { console.error(e); process.exit(1); });
+  `;
+  const out = JSON.parse(execFileSync(process.execPath, ['-e', script], { env: { ...process.env, HOME: home } }).toString().trim().split('\n').pop());
+  assert(out.wrote, '显式 mode 时应写入 modelPrices');
+  assert(out.sameMtime, '配置未变时不应重复改写 settings.json');
+  assert(out.untouchedByNoMode, '缺少 mode 时不应回落到默认模式改写 settings.json');
+  const mtime = fs.statSync(settingsFile).mtimeMs;
+  execFileSync(process.execPath, ['-e', `require(${JSON.stringify(path.join(__dirname, 'matcher.js'))}).applyGlobalModeIfChanged('api-only', ${JSON.stringify(custom)})`], { env: { ...process.env, HOME: home } });
+  assert.strictEqual(fs.statSync(settingsFile).mtimeMs, mtime, '新进程重复应用同一配置时不应写盘');
+  fs.rmSync(home, { recursive: true, force: true });
+  console.log('   ✓ 相同配置不写盘、缺省模式不覆盖用户价格');
+}
+
 console.log('\n🎉 所有测试用例 100% 通过！兼容本地与 CI 环境。');

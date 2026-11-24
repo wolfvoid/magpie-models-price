@@ -600,6 +600,32 @@ function scanAll() {
   return report;
 }
 
+function stableStringify(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort()
+      .filter((k) => value[k] !== undefined)
+      .map((k) => JSON.stringify(k) + ':' + stableStringify(value[k]))
+      .join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
+// settings.json is Magpie's own file. Rewriting it when nothing changed costs
+// a full re-serialisation each time and races with Magpie's own writes, so
+// only touch it when modelPrices really differ, and replace it atomically.
+function writeModelPricesIfChanged(s, newPrices) {
+  const before = s.modelPrices && Object.keys(s.modelPrices).length ? s.modelPrices : undefined;
+  const after = newPrices && Object.keys(newPrices).length ? newPrices : undefined;
+  if (stableStringify(before) === stableStringify(after)) return false;
+  if (after) s.modelPrices = after;
+  else delete s.modelPrices;
+  const tmp = SETTINGS_PATH + '.models-price.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(s, null, 2), 'utf8');
+  fs.renameSync(tmp, SETTINGS_PATH);
+  return true;
+}
+
 function applyPrice(model, priceString) {
   const parts = priceString.split(',').map(p => parseFloat(p.trim()) || 0);
   const priceObj = {
@@ -610,9 +636,7 @@ function applyPrice(model, priceString) {
   };
 
   const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
-  s.modelPrices = s.modelPrices || {};
-  s.modelPrices[model] = priceObj;
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2), 'utf8');
+  writeModelPricesIfChanged(s, { ...(s.modelPrices || {}), [model]: priceObj });
 
   return `Applied ${model} -> $${priceObj.input}/$${priceObj.output}`;
 }
@@ -620,11 +644,9 @@ function applyPrice(model, priceString) {
 function resetPrice(model) {
   const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
   if (s.modelPrices && s.modelPrices[model]) {
-    delete s.modelPrices[model];
-    if (Object.keys(s.modelPrices).length === 0) {
-      delete s.modelPrices;
-    }
-    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2), 'utf8');
+    const rest = { ...s.modelPrices };
+    delete rest[model];
+    writeModelPricesIfChanged(s, rest);
     return `Reset price for ${model}`;
   }
   return `No custom price found for ${model}`;
@@ -634,8 +656,9 @@ function resetPrice(model) {
  * Apply Global Pricing Mode:
  * - 'api-only': only write real prices for 'api' providers; subscription providers have prices set to 0 or removed
  * - 'all-equivalent': write market prices for all models
+ * Returns { count, changed }; settings.json is left untouched when nothing changed.
  */
-function applyGlobalMode(mode, customOverrides = {}) {
+function applyGlobalModeIfChanged(mode, customOverrides = {}) {
   const report = scanAll();
   const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
   const newPrices = { ...(s.modelPrices || {}) };
@@ -740,9 +763,12 @@ function applyGlobalMode(mode, customOverrides = {}) {
     }
   }
 
-  s.modelPrices = newPrices;
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2), 'utf8');
-  return Object.keys(newPrices).length;
+  const changed = writeModelPricesIfChanged(s, newPrices);
+  return { count: Object.keys(newPrices).length, changed };
+}
+
+function applyGlobalMode(mode, customOverrides = {}) {
+  return applyGlobalModeIfChanged(mode, customOverrides).count;
 }
 
 /**
@@ -842,6 +868,8 @@ module.exports = {
   applyPrice,
   resetPrice,
   applyGlobalMode,
+  applyGlobalModeIfChanged,
+  stableStringify,
   getBeijingTime,
   checkOffPeakStatus,
   hasOffPeakPreset

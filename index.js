@@ -5,13 +5,45 @@ const matcher = require('./matcher');
 
 const SETTINGS_PATH = path.join(process.env.HOME || '', '.config/magpie/settings.json');
 
-function syncModeAndPrices(options) {
-  if (!options || typeof options !== 'object') return;
+const MODES = new Set(['api-only', 'all-equivalent']);
+// Inputs the sync result depends on; when none changed, skip the ~3s scan.
+const SYNC_INPUTS = [
+  path.join(process.env.HOME || '', '.cache/magpie/models.json'),
+  path.join(process.env.HOME || '', '.cache/magpie/providers-state.json')
+];
+let lastSignature = '';
+
+function inputsSignature(mode, customPrices) {
+  const files = SYNC_INPUTS.map((file) => {
+    try {
+      const st = fs.statSync(file);
+      return st.mtimeMs + ':' + st.size;
+    } catch {
+      return 'missing';
+    }
+  });
+  let prices = 'unreadable';
   try {
-    const mode = options.mode || 'all-equivalent';
-    const customPrices = options.customPrices || {};
-    matcher.applyGlobalMode(mode, customPrices);
-    console.log(`Synchronized mode [${mode}] and custom prices to Magpie settings.json`);
+    prices = matcher.stableStringify(JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')).modelPrices || {});
+  } catch {}
+  return matcher.stableStringify({ mode, customPrices, files, prices });
+}
+
+// Sync only what the user actually saved. A missing or unknown mode must not
+// fall back to a default: hosts can call us before options are available, and
+// a silent 'all-equivalent' would overwrite an 'api-only' user's prices.
+async function syncModeAndPrices(options) {
+  try {
+    const opts = await options;
+    if (!opts || typeof opts !== 'object' || !MODES.has(opts.mode)) return;
+    const customPrices = opts.customPrices || {};
+    const signature = inputsSignature(opts.mode, customPrices);
+    if (signature === lastSignature) return;
+    const { changed } = matcher.applyGlobalModeIfChanged(opts.mode, customPrices);
+    lastSignature = inputsSignature(opts.mode, customPrices);
+    if (changed) {
+      console.log(`Synchronized mode [${opts.mode}] and custom prices to Magpie settings.json`);
+    }
   } catch (err) {
     console.error('Failed to sync mode and prices:', err.message);
   }
@@ -19,24 +51,22 @@ function syncModeAndPrices(options) {
 
 // OpenCode / Magpie Plugin export
 async function MagpieModelPricesPlugin(input, options) {
-  const getOpts = () => (typeof input?.magpie?.options === 'function' ? input.magpie.options() : null) || options || {};
-  syncModeAndPrices(getOpts());
+  const getOpts = async () => {
+    const live = typeof input?.magpie?.options === 'function' ? await input.magpie.options() : null;
+    return live && typeof live === 'object' ? live : (options || {});
+  };
+  // Keep the scan off the plugin's load path so the host finishes starting.
+  setTimeout(() => { syncModeAndPrices(getOpts()); }, 0);
 
   // Periodically check and synchronize new models from providers-state.json to settings.json
   if (typeof setInterval === 'function') {
-    setInterval(() => {
-      try {
-        syncModeAndPrices(getOpts());
-      } catch {}
-    }, 60000);
+    const timer = setInterval(() => { syncModeAndPrices(getOpts()); }, 60000);
+    timer.unref?.();
   }
 
   return {
     async config(cfg) {
-      const opts = getOpts();
-      if (opts) {
-        syncModeAndPrices(opts);
-      }
+      await syncModeAndPrices(getOpts());
     }
   };
 }
